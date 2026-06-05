@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # 1. PostgreSQL Database
@@ -24,7 +23,7 @@ services:
     image: redis:7-alpine
     container_name: leettrack-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
 
   # 3. Flask Backend Service
   backend:
