@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: leettrack-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: leettrack
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Cache & Queue Broker
+  redis:
+    image: redis:7-alpine
+    container_name: leettrack-redis
+    ports:
+      - "6379:6379"
+
+  # 3. Flask Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: leettrack-backend
+    ports:
+      - "5000:7860" # Maps local port 5000 to Hugging Face's container port 7860
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/leettrack
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=local-development-secret-key-12345
+      - RESEND_API_KEY=
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # 4. React Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: leettrack-frontend
+    ports:
+      - "3000:80" # Maps local port 3000 to Nginx port 80
+    environment:
+      - VITE_API_URL=http://localhost:5000/api
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
