@@ -23,6 +23,10 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
 
+# Ensure tables are created on startup (runs under gunicorn and direct execution)
+with app.app_context():
+    db.create_all()
+
 # Helper: JWT Decorator
 def token_required(f):
     @wraps(f)
@@ -488,7 +492,4 @@ def health():
     return jsonify({"status": "healthy", "service": "leettrack-backend"}), 200
 
 if __name__ == "__main__":
-    with app.app_context():
-        # Auto-create tables on launch
-        db.create_all()
     app.run(host="0.0.0.0", port=5000)
