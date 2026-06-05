@@ -25,7 +25,11 @@ db.init_app(app)
 
 # Ensure tables are created on startup (runs under gunicorn and direct execution)
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.warning(f"Database tables check/creation warning: {str(e)}")
 
 # Helper: JWT Decorator
 def token_required(f):
