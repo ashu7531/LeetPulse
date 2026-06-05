@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Terminal, Lock, Mail, ArrowRight } from 'lucide-react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { Terminal, Lock, Mail, ArrowRight, AlertTriangle } from 'lucide-react';
 import api from '../api';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sessionConflict = searchParams.get('reason') === 'session_conflict';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -59,6 +61,16 @@ const Login: React.FC = () => {
 
         {/* Card */}
         <div className="glass-card rounded-2xl p-8 shadow-2xl">
+          {/* Session conflict warning */}
+          {sessionConflict && (
+            <div className="mb-5 p-3.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs font-medium flex items-start gap-2">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                <strong>Session conflict detected.</strong> You were logged in as a different role in another tab. Please sign in again with the correct account.
+              </span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
               <div className="p-3.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium">

@@ -24,16 +24,29 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor to handle token expiry or errors
+// Response interceptor to handle token expiry or session conflicts
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // Clear storage and redirect to login if unauthorized
+      // Token expired or missing — force re-login
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
         window.location.href = '/login';
+      }
+    } else if (error.response && error.response.status === 403) {
+      // 403 = role mismatch. This happens when two different accounts are logged in
+      // across browser tabs and the stored token belongs to a different role.
+      // Fix: clear the stale session and force re-login.
+      const message = error.response.data?.message || '';
+      if (message.includes('Insufficient permissions') || message.includes('Access denied')) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+          // Add a query param so the login page can show a helpful message
+          window.location.href = '/login?reason=session_conflict';
+        }
       }
     }
     return Promise.reject(error);

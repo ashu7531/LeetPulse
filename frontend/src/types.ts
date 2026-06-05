@@ -8,6 +8,7 @@ export interface User {
   leetcode_username?: string;
   last_synced_at?: string;
   created_at: string;
+  batches?: Batch[];
 }
 
 export interface Batch {
@@ -17,6 +18,7 @@ export interface Batch {
   teacher_id: number;
   created_at: string;
   student_count?: number;
+  join_code: string;
 }
 
 export interface Assignment {
@@ -47,6 +49,9 @@ export interface StudentProgress {
   title_slug: string;
   status: 'PENDING' | 'ON_TIME' | 'LATE';
   solved_at?: string;
+  progress_id?: number;
+  submitted_code?: string;
+  submission_language?: string;
 }
 
 export interface StudentAssignmentProgress {

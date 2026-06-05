@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from models import db, User, Batch, Assignment, AssignmentProblem, StudentProgress
+from models import db, User, Batch, Assignment, AssignmentProblem, StudentProgress, batch_students
 from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile
+from sqlalchemy import text
 import jwt
 import datetime
 import os
@@ -30,6 +31,19 @@ with app.app_context():
     except Exception as e:
         db.session.rollback()
         app.logger.warning(f"Database tables check/creation warning: {str(e)}")
+
+    # Add LeetCode stats columns to users table if they don't exist yet (safe migration)
+    for col_sql in [
+        "ALTER TABLE users ADD COLUMN lc_total_solved INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN lc_easy_solved INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN lc_medium_solved INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN lc_hard_solved INTEGER DEFAULT 0",
+    ]:
+        try:
+            db.session.execute(text(col_sql))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 # Helper: JWT Decorator
 def token_required(f):
@@ -137,10 +151,13 @@ def login():
 @token_required
 def get_me(current_user):
     user_data = current_user.to_dict()
-    if current_user.role == 'STUDENT' and current_user.leetcode_username:
-        stats = fetch_leetcode_user_profile(current_user.leetcode_username)
-        if stats:
-            user_data['leetcode_stats'] = stats
+    if current_user.role == 'STUDENT':
+        batches = current_user.enrolled_batches.all()
+        user_data['batches'] = [b.to_dict() for b in batches]
+        if current_user.leetcode_username:
+            stats = fetch_leetcode_user_profile(current_user.leetcode_username)
+            if stats:
+                user_data['leetcode_stats'] = stats
     return jsonify(user_data), 200
 
 # --- TEACHER ENDPOINTS ---
@@ -203,6 +220,22 @@ def add_student_to_batch(current_user, batch_id):
         return jsonify({"message": "Student is already in this batch!"}), 400
 
     batch.students.append(student)
+
+    # Initialize progress records for all assignments currently in the batch
+    for assignment in batch.assignments:
+        for prob in assignment.problems:
+            exists = StudentProgress.query.filter_by(
+                student_id=student.id,
+                assignment_problem_id=prob.id
+            ).first()
+            if not exists:
+                progress = StudentProgress(
+                    student_id=student.id,
+                    assignment_problem_id=prob.id,
+                    status="PENDING"
+                )
+                db.session.add(progress)
+
     db.session.commit()
 
     # Trigger welcome email (non-blocking notification)
@@ -217,6 +250,33 @@ def add_student_to_batch(current_user, batch_id):
     send_email_via_resend(student.email, f"Enrolled in Batch: {batch.name}", email_body)
 
     return jsonify({"message": "Student enrolled successfully!"}), 200
+
+@app.route("/api/teacher/batches/<int:batch_id>/students/<int:student_id>", methods=["DELETE"])
+@token_required
+@roles_allowed("TEACHER")
+def remove_student_from_batch(current_user, batch_id, student_id):
+    batch = Batch.query.filter_by(id=batch_id, teacher_id=current_user.id).first()
+    if not batch:
+        return jsonify({"message": "Batch not found!"}), 404
+
+    student = User.query.filter_by(id=student_id, role="STUDENT").first()
+    if not student or student not in batch.students:
+        return jsonify({"message": "Student not found in this batch!"}), 404
+
+    batch.students.remove(student)
+
+    # Delete progress records for assignments in this batch
+    assignment_ids = [a.id for a in batch.assignments]
+    if assignment_ids:
+        prob_ids = [p.id for p in AssignmentProblem.query.filter(AssignmentProblem.assignment_id.in_(assignment_ids)).all()]
+        if prob_ids:
+            StudentProgress.query.filter(
+                StudentProgress.student_id == student.id,
+                StudentProgress.assignment_problem_id.in_(prob_ids)
+            ).delete(synchronize_session=False)
+
+    db.session.commit()
+    return jsonify({"message": "Student removed from batch successfully!"}), 200
 
 @app.route("/api/teacher/batches/<int:batch_id>/assignments", methods=["GET"])
 @token_required
@@ -339,12 +399,16 @@ def get_assignment_progress(current_user, assignment_id):
             if record:
                 progress_dict[prob.id] = {
                     "status": record.status,
-                    "solved_at": record.solved_at.isoformat() if record.solved_at else None
+                    "solved_at": record.solved_at.isoformat() if record.solved_at else None,
+                    "code_submission": record.submitted_code,
+                    "submission_language": record.submission_language
                 }
             else:
                 progress_dict[prob.id] = {
                     "status": "PENDING",
-                    "solved_at": None
+                    "solved_at": None,
+                    "code_submission": None,
+                    "submission_language": None
                 }
                 
         student_progress.append({
@@ -382,7 +446,7 @@ def get_leetcode_problem_details(current_user):
         
     return jsonify(details), 200
 
-# Calculate leaderboard rankings for a batch
+# Calculate leaderboard rankings for a batch (LeetCode-based)
 def get_leaderboard_data(batch_id):
     batch = Batch.query.get(batch_id)
     if not batch:
@@ -390,31 +454,48 @@ def get_leaderboard_data(batch_id):
 
     students = batch.students
     leaderboard = []
+    needs_commit = False
 
     for student in students:
-        # Get all progress records for this student related to this batch
-        records = StudentProgress.query.join(AssignmentProblem).join(Assignment).filter(
-            StudentProgress.student_id == student.id,
-            Assignment.batch_id == batch_id
-        ).all()
+        total  = getattr(student, 'lc_total_solved', 0) or 0
+        easy   = getattr(student, 'lc_easy_solved', 0) or 0
+        medium = getattr(student, 'lc_medium_solved', 0) or 0
+        hard   = getattr(student, 'lc_hard_solved', 0) or 0
 
-        problems_solved_on_time = sum(1 for r in records if r.status == 'ON_TIME')
-        problems_solved_late = sum(1 for r in records if r.status == 'LATE')
-        total_solved = problems_solved_on_time + problems_solved_late
+        # Auto-backfill: if student has a LeetCode username but no cached stats yet
+        if student.leetcode_username and total == 0:
+            try:
+                stats = fetch_leetcode_user_profile(student.leetcode_username)
+                if stats:
+                    student.lc_total_solved  = stats.get('all', 0)
+                    student.lc_easy_solved   = stats.get('easy', 0)
+                    student.lc_medium_solved = stats.get('medium', 0)
+                    student.lc_hard_solved   = stats.get('hard', 0)
+                    total  = student.lc_total_solved
+                    easy   = student.lc_easy_solved
+                    medium = student.lc_medium_solved
+                    hard   = student.lc_hard_solved
+                    needs_commit = True
+            except Exception:
+                pass
 
         leaderboard.append({
             "student_id": student.id,
             "username": student.username,
             "leetcode_username": student.leetcode_username,
-            "problems_solved_on_time": problems_solved_on_time,
-            "problems_solved_late": problems_solved_late,
-            "total_solved": total_solved
+            "lc_total_solved": total,
+            "lc_easy_solved": easy,
+            "lc_medium_solved": medium,
+            "lc_hard_solved": hard,
+            "rank": 0
         })
 
-    # Sort by total solved desc, then on_time solved desc
-    leaderboard.sort(key=lambda x: (-x["total_solved"], -x["problems_solved_on_time"]))
+    if needs_commit:
+        db.session.commit()
 
-    # Add ranks
+    # Rank by total solved descending, then by hard solved as tiebreaker
+    leaderboard.sort(key=lambda x: (-x["lc_total_solved"], -x["lc_hard_solved"]))
+
     for index, entry in enumerate(leaderboard):
         entry["rank"] = index + 1
 
@@ -479,12 +560,15 @@ def get_student_assignments(current_user):
                 ).first()
                 
                 problems_progress.append({
+                    "progress_id": progress.id if progress else None,
                     "problem_id": prob.id,
                     "problem_title": prob.title,
                     "problem_difficulty": prob.difficulty,
                     "title_slug": prob.title_slug,
                     "status": progress.status if progress else "PENDING",
-                    "solved_at": progress.solved_at.isoformat() if (progress and progress.solved_at) else None
+                    "solved_at": progress.solved_at.isoformat() if (progress and progress.solved_at) else None,
+                    "submitted_code": progress.submitted_code if progress else None,
+                    "submission_language": progress.submission_language if progress else None
                 })
             
             assignments_progress.append({
@@ -514,12 +598,15 @@ def get_student_assignment_detail(current_user, assignment_id):
         ).first()
         
         problems_progress.append({
+            "progress_id": progress.id if progress else None,
             "problem_id": prob.id,
             "problem_title": prob.title,
             "problem_difficulty": prob.difficulty,
             "title_slug": prob.title_slug,
             "status": progress.status if progress else "PENDING",
-            "solved_at": progress.solved_at.isoformat() if (progress and progress.solved_at) else None
+            "solved_at": progress.solved_at.isoformat() if (progress and progress.solved_at) else None,
+            "submitted_code": progress.submitted_code if progress else None,
+            "submission_language": progress.submission_language if progress else None
         })
 
     return jsonify({
@@ -541,10 +628,18 @@ def link_leetcode(current_user):
         return jsonify({"message": "LeetCode username is required!"}), 400
 
     current_user.leetcode_username = leetcode_username
+
+    # Fetch and cache LeetCode stats immediately on link
+    stats = fetch_leetcode_user_profile(leetcode_username)
+    if stats:
+        current_user.lc_total_solved = stats.get('all', 0)
+        current_user.lc_easy_solved = stats.get('easy', 0)
+        current_user.lc_medium_solved = stats.get('medium', 0)
+        current_user.lc_hard_solved = stats.get('hard', 0)
+
     db.session.commit()
 
     user_dict = current_user.to_dict()
-    stats = fetch_leetcode_user_profile(leetcode_username)
     if stats:
         user_dict['leetcode_stats'] = stats
 
@@ -563,6 +658,15 @@ def trigger_student_sync(current_user):
     try:
         synced_count = sync_student_progress(current_user.id)
         stats = fetch_leetcode_user_profile(current_user.leetcode_username)
+
+        # Cache the updated stats in the DB for leaderboard use
+        if stats:
+            current_user.lc_total_solved = stats.get('all', 0)
+            current_user.lc_easy_solved = stats.get('easy', 0)
+            current_user.lc_medium_solved = stats.get('medium', 0)
+            current_user.lc_hard_solved = stats.get('hard', 0)
+            db.session.commit()
+
         return jsonify({
             "message": "Progress synchronization completed!",
             "synced_count": synced_count,
@@ -575,13 +679,188 @@ def trigger_student_sync(current_user):
 @token_required
 @roles_allowed("STUDENT")
 def get_student_leaderboard(current_user):
+    """Returns a LeetCode global solve count ranking of all students in the enrolled batch."""
     batches = current_user.enrolled_batches.all()
     if not batches:
         return jsonify([]), 200
 
-    # Return leaderboard of the first enrolled batch for simplicity
-    first_batch_id = batches[0].id
-    return jsonify(get_leaderboard_data(first_batch_id)), 200
+    batch = batches[0]
+    students = batch.students
+    needs_commit = False
+
+    leaderboard = []
+    for student in students:
+        total  = getattr(student, 'lc_total_solved', 0) or 0
+        easy   = getattr(student, 'lc_easy_solved', 0) or 0
+        medium = getattr(student, 'lc_medium_solved', 0) or 0
+        hard   = getattr(student, 'lc_hard_solved', 0) or 0
+
+        # Auto-backfill: if student has a LeetCode username but no cached stats yet,
+        # fetch and store them now. This handles users who linked before the lc_* columns existed.
+        if student.leetcode_username and total == 0:
+            try:
+                stats = fetch_leetcode_user_profile(student.leetcode_username)
+                if stats:
+                    student.lc_total_solved  = stats.get('all', 0)
+                    student.lc_easy_solved   = stats.get('easy', 0)
+                    student.lc_medium_solved = stats.get('medium', 0)
+                    student.lc_hard_solved   = stats.get('hard', 0)
+                    total  = student.lc_total_solved
+                    easy   = student.lc_easy_solved
+                    medium = student.lc_medium_solved
+                    hard   = student.lc_hard_solved
+                    needs_commit = True
+            except Exception:
+                pass  # If LeetCode API fails, show 0 gracefully
+
+        leaderboard.append({
+            "student_id": student.id,
+            "username": student.username,
+            "leetcode_username": student.leetcode_username,
+            "lc_total_solved": total,
+            "lc_easy_solved": easy,
+            "lc_medium_solved": medium,
+            "lc_hard_solved": hard,
+        })
+
+    if needs_commit:
+        db.session.commit()
+
+    # Rank by total solved descending, then by hard solved as tiebreaker
+    leaderboard.sort(key=lambda x: (-x["lc_total_solved"], -x["lc_hard_solved"]))
+    for i, entry in enumerate(leaderboard):
+        entry["rank"] = i + 1
+
+    return jsonify(leaderboard), 200
+
+@app.route("/api/student/join-batch", methods=["POST"])
+@token_required
+@roles_allowed("STUDENT")
+def join_batch(current_user):
+    data = request.get_json()
+    join_code = data.get("join_code")
+
+    if not join_code:
+        return jsonify({"message": "Join code is required!"}), 400
+
+    batch = Batch.query.filter_by(join_code=join_code.upper().strip()).first()
+    if not batch:
+        return jsonify({"message": "Invalid join code! Please double-check and try again."}), 404
+
+    if current_user in batch.students:
+        return jsonify({"message": "You are already enrolled in this batch!"}), 400
+
+    batch.students.append(current_user)
+
+    # Initialize progress records for all assignments currently in this batch
+    for assignment in batch.assignments:
+        for prob in assignment.problems:
+            exists = StudentProgress.query.filter_by(
+                student_id=current_user.id,
+                assignment_problem_id=prob.id
+            ).first()
+            if not exists:
+                progress = StudentProgress(
+                    student_id=current_user.id,
+                    assignment_problem_id=prob.id,
+                    status="PENDING"
+                )
+                db.session.add(progress)
+
+    db.session.commit()
+    return jsonify({
+        "message": f"Successfully joined batch: {batch.name}",
+        "batch": batch.to_dict()
+    }), 200
+
+@app.route("/api/student/leave-batch", methods=["POST"])
+@token_required
+@roles_allowed("STUDENT")
+def leave_batch(current_user):
+    data = request.get_json() or {}
+    batch_id = data.get("batch_id")
+
+    if batch_id:
+        batch = Batch.query.get(batch_id)
+        if not batch:
+            return jsonify({"message": "Batch not found!"}), 404
+        # Verify student is actually enrolled using a direct DB query (not ORM list)
+        enrolled = db.session.execute(
+            batch_students.select().where(
+                (batch_students.c.batch_id == batch.id) &
+                (batch_students.c.student_id == current_user.id)
+            )
+        ).fetchone()
+        if not enrolled:
+            return jsonify({"message": "You are not enrolled in this batch!"}), 400
+        batches_to_leave = [batch]
+    else:
+        batches_to_leave = current_user.enrolled_batches.all()
+        if not batches_to_leave:
+            return jsonify({"message": "You are not enrolled in any batch!"}), 400
+
+    for batch in batches_to_leave:
+        # Step 1: Delete StudentProgress records first (avoids FK issues)
+        assignment_ids = [a.id for a in batch.assignments]
+        if assignment_ids:
+            prob_ids = [
+                p.id for p in AssignmentProblem.query.filter(
+                    AssignmentProblem.assignment_id.in_(assignment_ids)
+                ).all()
+            ]
+            if prob_ids:
+                db.session.execute(
+                    StudentProgress.__table__.delete().where(
+                        (StudentProgress.__table__.c.student_id == current_user.id) &
+                        (StudentProgress.__table__.c.assignment_problem_id.in_(prob_ids))
+                    )
+                )
+
+        # Step 2: Delete the association row directly using SQL (avoids ORM cascade conflicts)
+        db.session.execute(
+            batch_students.delete().where(
+                (batch_students.c.batch_id == batch.id) &
+                (batch_students.c.student_id == current_user.id)
+            )
+        )
+
+    db.session.commit()
+    return jsonify({"message": "Successfully left batch!"}), 200
+
+@app.route("/api/student/progress/<int:progress_id>/submit-code", methods=["POST"])
+@token_required
+@roles_allowed("STUDENT")
+def submit_code(current_user, progress_id):
+    progress = StudentProgress.query.get(progress_id)
+    if not progress:
+        return jsonify({"message": "Progress record not found!"}), 404
+
+    if progress.student_id != current_user.id:
+        return jsonify({"message": "Unauthorized!"}), 403
+
+    data = request.get_json()
+    submitted_code = data.get("submitted_code")
+    submission_language = data.get("submission_language")
+
+    if not submitted_code or not submission_language:
+        return jsonify({"message": "Code snippet and language selection are required!"}), 400
+
+    assignment_problem = AssignmentProblem.query.get(progress.assignment_problem_id)
+    assignment = Assignment.query.get(assignment_problem.assignment_id)
+
+    now = datetime.datetime.utcnow()
+    status = "ON_TIME" if now <= assignment.deadline else "LATE"
+
+    progress.status = status
+    progress.solved_at = now
+    progress.submitted_code = submitted_code
+    progress.submission_language = submission_language
+
+    db.session.commit()
+    return jsonify({
+        "message": "Code solution submitted successfully!",
+        "progress": progress.to_dict()
+    }), 200
 
 # --- APP STARTUP & HEALTH ---
 

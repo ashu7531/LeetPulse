@@ -52,11 +52,19 @@ class Batch(db.Model):
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
     teacher_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    join_code = db.Column(db.String(10), unique=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
     students = db.relationship('User', secondary=batch_students, backref=db.backref('enrolled_batches', lazy='dynamic'))
     assignments = db.relationship('Assignment', backref='batch', lazy=True, cascade="all, delete-orphan")
+
+    def __init__(self, **kwargs):
+        super(Batch, self).__init__(**kwargs)
+        if not self.join_code:
+            import random
+            import string
+            self.join_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
     def to_dict(self):
         return {
@@ -64,6 +72,7 @@ class Batch(db.Model):
             'name': self.name,
             'description': self.description,
             'teacher_id': self.teacher_id,
+            'join_code': self.join_code,
             'student_count': len(self.students),
             'created_at': self.created_at.isoformat()
         }
@@ -123,6 +132,8 @@ class StudentProgress(db.Model):
     assignment_problem_id = db.Column(db.Integer, db.ForeignKey('assignment_problems.id', ondelete='CASCADE'), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='PENDING')  # 'PENDING', 'ON_TIME', 'LATE'
     solved_at = db.Column(db.DateTime, nullable=True)
+    submitted_code = db.Column(db.Text, nullable=True)
+    submission_language = db.Column(db.String(50), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
@@ -132,5 +143,7 @@ class StudentProgress(db.Model):
             'assignment_problem_id': self.assignment_problem_id,
             'status': self.status,
             'solved_at': self.solved_at.isoformat() if self.solved_at else None,
+            'submitted_code': self.submitted_code,
+            'submission_language': self.submission_language,
             'updated_at': self.updated_at.isoformat()
         }
