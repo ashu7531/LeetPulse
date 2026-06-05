@@ -34,8 +34,6 @@ const TeacherDashboard: React.FC = () => {
   const [problemsList, setProblemsList] = useState<{ problem_id: string; title: string; title_slug: string; difficulty: 'Easy' | 'Medium' | 'Hard' }[]>([]);
   const [currentProbSlug, setCurrentProbSlug] = useState('');
   const [currentProbTitle, setCurrentProbTitle] = useState('');
-  const [currentProbDiff, setCurrentProbDiff] = useState<'Easy' | 'Medium' | 'Hard'>('Easy');
-  const [problemLookupLoading, setProblemLookupLoading] = useState(false);
 
   // Assignment Progress Detail Modal States
   const [selectedProgressAssignment, setSelectedProgressAssignment] = useState<Assignment | null>(null);
@@ -122,40 +120,9 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
-  const handleFetchProblemDetails = async () => {
-    if (!currentProbSlug) {
-      setError('Please provide a LeetCode Slug or URL to fetch.');
-      return;
-    }
-
-    let slug = currentProbSlug.trim();
-    if (slug.includes('leetcode.com/problems/')) {
-      const match = slug.match(/leetcode\.com\/problems\/([^/]+)/);
-      if (match && match[1]) {
-        slug = match[1];
-      }
-    }
-
-    setProblemLookupLoading(true);
-    setError('');
-    try {
-      const res = await api.get(`/teacher/problem-details?slug=${encodeURIComponent(slug)}`);
-      const details = res.data;
-
-      setCurrentProbTitle(details.title || '');
-      setCurrentProbDiff(details.difficulty as 'Easy' | 'Medium' | 'Hard' || 'Easy');
-      setCurrentProbSlug(slug);
-      setError('');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Could not fetch problem details from LeetCode. Double check the slug/URL.');
-    } finally {
-      setProblemLookupLoading(false);
-    }
-  };
-
   const handleAddProblemToDraft = () => {
     if (!currentProbSlug || !currentProbTitle) {
-      setError('Please provide both a Title and Slug/URL.');
+      setError('Please provide both a Problem Title and a LeetCode Slug or URL.');
       return;
     }
 
@@ -171,13 +138,12 @@ const TeacherDashboard: React.FC = () => {
       problem_id: String(Date.now()),
       title: currentProbTitle.trim(),
       title_slug: slug,
-      difficulty: currentProbDiff
+      difficulty: 'Medium' as const
     };
 
     setProblemsList([...problemsList, newProb]);
     setCurrentProbSlug('');
     setCurrentProbTitle('');
-    setCurrentProbDiff('Easy');
     setError('');
   };
 
@@ -690,63 +656,35 @@ const TeacherDashboard: React.FC = () => {
                 )}
 
                 {/* Form to add problem to draft list */}
-                <div className="space-y-3 p-4 bg-slate-900/40 border border-white/5 rounded-2xl">
-                  <div className="flex flex-col md:flex-row gap-3 items-end">
-                    <div className="flex-1 w-full">
-                      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">LeetCode Problem Slug or URL</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. two-sum or https://leetcode.com/problems/two-sum"
-                        value={currentProbSlug}
-                        onChange={(e) => setCurrentProbSlug(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      disabled={problemLookupLoading}
-                      onClick={handleFetchProblemDetails}
-                      className="w-full md:w-auto px-5 py-2.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
-                    >
-                      <PlusCircle size={14} /> 
-                      {problemLookupLoading ? 'Fetching...' : 'Fetch Details'}
-                    </button>
+                {/* Form to add problem to draft list */}
+                <div className="flex flex-col md:flex-row gap-3 items-end p-4 bg-slate-900/40 border border-white/5 rounded-2xl">
+                  <div className="flex-1 w-full">
+                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">LeetCode Problem Slug or URL</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. two-sum or https://leetcode.com/problems/two-sum"
+                      value={currentProbSlug}
+                      onChange={(e) => setCurrentProbSlug(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                    <div className="md:col-span-2">
-                      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Problem Title (Editable)</label>
-                      <input
-                        type="text"
-                        placeholder="Problem Title"
-                        value={currentProbTitle}
-                        onChange={(e) => setCurrentProbTitle(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Difficulty</label>
-                      <select
-                        value={currentProbDiff}
-                        onChange={(e) => setCurrentProbDiff(e.target.value as any)}
-                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none"
-                      >
-                        <option value="Easy">Easy</option>
-                        <option value="Medium">Medium</option>
-                        <option value="Hard">Hard</option>
-                      </select>
-                    </div>
+                  <div className="flex-1 w-full">
+                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Problem Title</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Two Sum"
+                      value={currentProbTitle}
+                      onChange={(e) => setCurrentProbTitle(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
                   </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      onClick={handleAddProblemToDraft}
-                      className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/10"
-                    >
-                      <PlusCircle size={14} /> Add Problem
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddProblemToDraft}
+                    className="w-full md:w-auto px-5 py-2.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Problem
+                  </button>
                 </div>
               </div>
 

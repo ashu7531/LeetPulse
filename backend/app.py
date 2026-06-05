@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from models import db, User, Batch, Assignment, AssignmentProblem, StudentProgress
-from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details
+from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile
 import jwt
 import datetime
 import os
@@ -136,7 +136,12 @@ def login():
 @app.route("/api/auth/me", methods=["GET"])
 @token_required
 def get_me(current_user):
-    return jsonify(current_user.to_dict()), 200
+    user_data = current_user.to_dict()
+    if current_user.role == 'STUDENT' and current_user.leetcode_username:
+        stats = fetch_leetcode_user_profile(current_user.leetcode_username)
+        if stats:
+            user_data['leetcode_stats'] = stats
+    return jsonify(user_data), 200
 
 # --- TEACHER ENDPOINTS ---
 
@@ -257,12 +262,26 @@ def publish_assignment(current_user, batch_id):
 
     # Create problems and map progress records
     for prob in problems_data:
+        title_slug = prob.get("title_slug")
+        if title_slug:
+            title_slug = title_slug.strip()
+            if "leetcode.com/problems/" in title_slug:
+                import re
+                match = re.search(r"leetcode\.com/problems/([^/]+)", title_slug)
+                if match:
+                    title_slug = match.group(1)
+
+        # Automatically look up difficulty and real LeetCode ID from slug on the backend
+        resolved = fetch_leetcode_problem_details(title_slug) if title_slug else None
+        difficulty = resolved.get("difficulty", "Medium") if resolved else "Medium"
+        problem_id = resolved.get("problem_id", prob.get("problem_id") or str(int(datetime.datetime.utcnow().timestamp()))) if resolved else (prob.get("problem_id") or str(int(datetime.datetime.utcnow().timestamp())))
+
         new_prob = AssignmentProblem(
             assignment_id=new_assignment.id,
-            problem_id=prob.get("problem_id"),
-            title_slug=prob.get("title_slug"),
-            title=prob.get("title"),
-            difficulty=prob.get("difficulty")
+            problem_id=problem_id,
+            title_slug=title_slug,
+            title=prob.get("title") or (resolved.get("title") if resolved else title_slug),
+            difficulty=difficulty
         )
         db.session.add(new_prob)
         db.session.flush()
@@ -524,9 +543,14 @@ def link_leetcode(current_user):
     current_user.leetcode_username = leetcode_username
     db.session.commit()
 
+    user_dict = current_user.to_dict()
+    stats = fetch_leetcode_user_profile(leetcode_username)
+    if stats:
+        user_dict['leetcode_stats'] = stats
+
     return jsonify({
         "message": "LeetCode profile linked successfully!",
-        "user": current_user.to_dict()
+        "user": user_dict
     }), 200
 
 @app.route("/api/student/sync-progress", methods=["POST"])
@@ -538,9 +562,11 @@ def trigger_student_sync(current_user):
 
     try:
         synced_count = sync_student_progress(current_user.id)
+        stats = fetch_leetcode_user_profile(current_user.leetcode_username)
         return jsonify({
             "message": "Progress synchronization completed!",
-            "synced_count": synced_count
+            "synced_count": synced_count,
+            "leetcode_stats": stats
         }), 200
     except Exception as e:
         return jsonify({"message": f"Synchronization error: {str(e)}"}), 500

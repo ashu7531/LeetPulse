@@ -165,3 +165,44 @@ def fetch_leetcode_problem_details(title_slug):
     except Exception as e:
         print(f"Error fetching problem details for {title_slug}: {str(e)}")
         return None
+
+# Fetch LeetCode user statistics (Easy, Medium, Hard, and Total Solved)
+def fetch_leetcode_user_profile(username):
+    url = "https://leetcode.com/graphql"
+    query = """
+    query userProblemsSolved($username: String!) {
+      matchedUser(username: $username) {
+        submitStats {
+          acSubmissionNum {
+            difficulty
+            count
+          }
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "username": username
+        }
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            data = response.json().get("data", {}).get("matchedUser")
+            if data:
+                stats_list = data.get("submitStats", {}).get("acSubmissionNum", [])
+                stats = {}
+                for item in stats_list:
+                    stats[item.get("difficulty")] = item.get("count")
+                return {
+                    "all": stats.get("All", 0),
+                    "easy": stats.get("Easy", 0),
+                    "medium": stats.get("Medium", 0),
+                    "hard": stats.get("Hard", 0)
+                }
+        return None
+    except Exception as e:
+        print(f"Error fetching user profile stats for {username}: {str(e)}")
+        return None

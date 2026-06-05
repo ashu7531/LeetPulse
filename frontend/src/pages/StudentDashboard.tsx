@@ -12,6 +12,7 @@ const StudentDashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<StudentAssignmentProgress[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [selectedAssignment, setSelectedAssignment] = useState<StudentAssignmentProgress | null>(null);
+  const [leetcodeStats, setLeetcodeStats] = useState<{ all: number; easy: number; medium: number; hard: number } | null>(null);
   
   const [leetcodeUsername, setLeetcodeUsername] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
@@ -25,6 +26,9 @@ const StudentDashboard: React.FC = () => {
       const parsed = JSON.parse(userJson);
       setCurrentUser(parsed);
       setLeetcodeUsername(parsed.leetcode_username || '');
+      if (parsed.leetcode_stats) {
+        setLeetcodeStats(parsed.leetcode_stats);
+      }
     }
     fetchDashboardData();
   }, []);
@@ -41,6 +45,9 @@ const StudentDashboard: React.FC = () => {
       setLeaderboard(leaderboardRes.data);
       setCurrentUser(meRes.data);
       localStorage.setItem('user', JSON.stringify(meRes.data));
+      if (meRes.data.leetcode_stats) {
+        setLeetcodeStats(meRes.data.leetcode_stats);
+      }
     } catch (err: any) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -53,10 +60,13 @@ const StudentDashboard: React.FC = () => {
     setLinkLoading(true);
     setMessage(null);
     try {
-      await api.post('/student/link-leetcode', { leetcode_username: leetcodeUsername });
-      const updatedUser = { ...currentUser!, leetcode_username: leetcodeUsername };
+      const res = await api.post('/student/link-leetcode', { leetcode_username: leetcodeUsername });
+      const updatedUser = res.data.user;
       localStorage.setItem('user', JSON.stringify(updatedUser));
       setCurrentUser(updatedUser);
+      if (updatedUser.leetcode_stats) {
+        setLeetcodeStats(updatedUser.leetcode_stats);
+      }
       setMessage({ text: 'LeetCode profile linked successfully!', type: 'success' });
       fetchDashboardData();
     } catch (err: any) {
@@ -74,6 +84,9 @@ const StudentDashboard: React.FC = () => {
     setMessage(null);
     try {
       const res = await api.post('/student/sync-progress');
+      if (res.data.leetcode_stats) {
+        setLeetcodeStats(res.data.leetcode_stats);
+      }
       setMessage({ 
         text: `Progress synced! ${res.data.synced_count} new solves updated.`, 
         type: 'success' 
@@ -163,6 +176,22 @@ const StudentDashboard: React.FC = () => {
                 ) : (
                   <span>First sync in progress... refresh in a few seconds!</span>
                 )}
+              </div>
+            )}
+            {leetcodeStats && (
+              <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-white/5">
+                <div className="bg-slate-900/60 px-3 py-1.5 rounded-lg border border-white/5 text-[11px] text-gray-400">
+                  <span className="text-white font-bold mr-1">{leetcodeStats.all}</span> Total Solved
+                </div>
+                <div className="bg-green-500/10 px-3 py-1.5 rounded-lg border border-green-500/15 text-[11px] text-green-400">
+                  <span className="font-bold mr-1">{leetcodeStats.easy}</span> Easy
+                </div>
+                <div className="bg-yellow-500/10 px-3 py-1.5 rounded-lg border border-yellow-500/15 text-[11px] text-yellow-400">
+                  <span className="font-bold mr-1">{leetcodeStats.medium}</span> Medium
+                </div>
+                <div className="bg-red-500/10 px-3 py-1.5 rounded-lg border border-red-500/15 text-[11px] text-red-400">
+                  <span className="font-bold mr-1">{leetcodeStats.hard}</span> Hard
+                </div>
               </div>
             )}
           </div>
