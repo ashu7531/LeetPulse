@@ -364,6 +364,7 @@ def get_student_assignments(current_user):
             assignments_progress.append({
                 "assignment_id": assign.id,
                 "title": assign.title,
+                "description": assign.description,
                 "deadline": assign.deadline.isoformat(),
                 "problems": problems_progress
             })
@@ -398,6 +399,7 @@ def get_student_assignment_detail(current_user, assignment_id):
     return jsonify({
         "assignment_id": assign.id,
         "title": assign.title,
+        "description": assign.description,
         "deadline": assign.deadline.isoformat(),
         "problems": problems_progress
     }), 200

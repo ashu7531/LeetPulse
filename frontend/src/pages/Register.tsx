@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Terminal, Lock, Mail, User as UserIcon, BookOpen, GraduationCap } from 'lucide-react';
 import api from '../api';
-import { UserRole } from '../types';
+import type { UserRole } from '../types';
 
 const Register: React.FC = () => {
   const navigate = useNavigate();

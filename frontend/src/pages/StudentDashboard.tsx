@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Award, BookOpen, CheckCircle, Clock, AlertCircle, 
-  ExternalLink, RefreshCw, Link as LinkIcon, User as UserIcon, ShieldAlert 
+  ExternalLink, RefreshCw, Link as LinkIcon
 } from 'lucide-react';
 import api from '../api';
 import Navbar from '../components/Navbar';
-import { StudentAssignmentProgress, LeaderboardEntry, User } from '../types';
+import type { StudentAssignmentProgress, LeaderboardEntry, User } from '../types';
 
 const StudentDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -50,7 +50,7 @@ const StudentDashboard: React.FC = () => {
     setLinkLoading(true);
     setMessage(null);
     try {
-      const res = await api.post('/student/link-leetcode', { leetcode_username: leetcodeUsername });
+      await api.post('/student/link-leetcode', { leetcode_username: leetcodeUsername });
       const updatedUser = { ...currentUser!, leetcode_username: leetcodeUsername };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       setCurrentUser(updatedUser);
@@ -391,7 +391,6 @@ const StudentDashboard: React.FC = () => {
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Assigned Problems</h4>
               
               {selectedAssignment.problems.map((prob) => {
-                const isSolved = prob.status !== 'PENDING';
                 let statusBadge = (
                   <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 font-medium">
                     Pending

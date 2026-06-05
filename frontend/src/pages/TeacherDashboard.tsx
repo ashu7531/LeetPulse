@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, Plus, BookOpen, UserPlus, Award, Calendar, 
-  Trash2, ChevronRight, LayoutDashboard, ArrowLeft, PlusCircle, Link as LinkIcon
+  Trash2, ChevronRight, LayoutDashboard, ArrowLeft, PlusCircle
 } from 'lucide-react';
 import api from '../api';
 import Navbar from '../components/Navbar';
-import { Batch, Assignment, LeaderboardEntry } from '../types';
+import type { Batch, Assignment, LeaderboardEntry } from '../types';
 
 const TeacherDashboard: React.FC = () => {
   const [batches, setBatches] = useState<Batch[]>([]);

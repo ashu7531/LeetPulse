@@ -51,6 +51,7 @@ export interface StudentProgress {
 export interface StudentAssignmentProgress {
   assignment_id: number;
   title: string;
+  description?: string;
   deadline: string;
   problems: StudentProgress[];
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { LogOut, User as UserIcon, Terminal } from 'lucide-react';
-import { User } from '../types';
+import type { User } from '../types';
 
 const Navbar: React.FC = () => {
   const navigate = useNavigate();
