@@ -15,6 +15,7 @@ const StudentDashboard: React.FC = () => {
   
   const [leetcodeUsername, setLeetcodeUsername] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -65,6 +66,26 @@ const StudentDashboard: React.FC = () => {
       });
     } finally {
       setLinkLoading(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    setSyncLoading(true);
+    setMessage(null);
+    try {
+      const res = await api.post('/student/sync-progress');
+      setMessage({ 
+        text: `Progress synced! ${res.data.synced_count} new solves updated.`, 
+        type: 'success' 
+      });
+      fetchDashboardData();
+    } catch (err: any) {
+      setMessage({ 
+        text: err.response?.data?.message || 'Failed to sync progress.', 
+        type: 'error' 
+      });
+    } finally {
+      setSyncLoading(false);
     }
   };
 
@@ -147,20 +168,30 @@ const StudentDashboard: React.FC = () => {
           </div>
           
           {currentUser?.leetcode_username ? (
-            <div className="flex items-center gap-4 bg-indigo-500/10 border border-indigo-500/20 px-5 py-3.5 rounded-xl">
-              <div>
-                <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block">Connected Profile</span>
-                <span className="text-sm text-white font-bold">{currentUser.leetcode_username}</span>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+              <div className="flex items-center justify-between gap-6 bg-indigo-500/10 border border-indigo-500/20 px-5 py-3.5 rounded-xl">
+                <div>
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block">Connected Profile</span>
+                  <span className="text-sm text-white font-bold">{currentUser.leetcode_username}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    // Temporarily clear to show form
+                    setCurrentUser({ ...currentUser, leetcode_username: undefined });
+                    setLeetcodeUsername('');
+                  }}
+                  className="text-xs font-semibold text-gray-400 hover:text-white underline cursor-pointer"
+                >
+                  Change
+                </button>
               </div>
               <button
-                onClick={() => {
-                  // Temporarily clear to show form
-                  setCurrentUser({ ...currentUser, leetcode_username: undefined });
-                  setLeetcodeUsername('');
-                }}
-                className="text-xs font-semibold text-gray-400 hover:text-white underline cursor-pointer"
+                onClick={handleManualSync}
+                disabled={syncLoading}
+                className="flex items-center justify-center gap-2 px-5 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/20"
               >
-                Change
+                <RefreshCw className={`w-4 h-4 ${syncLoading ? 'animate-spin' : ''}`} />
+                {syncLoading ? 'Syncing...' : 'Sync Progress'}
               </button>
             </div>
           ) : (

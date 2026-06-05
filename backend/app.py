@@ -417,31 +417,31 @@ def get_teacher_leaderboard(current_user, batch_id):
 @token_required
 @roles_allowed("STUDENT")
 def get_student_assignments(current_user):
-    # Auto-sync check (15 minutes cooldown)
-    if current_user.leetcode_username:
-        import threading
-        now = datetime.datetime.utcnow()
-        needs_sync = False
-        if not current_user.last_synced_at:
-            needs_sync = True
-        else:
-            diff = now - current_user.last_synced_at
-            if diff.total_seconds() > 900:  # 15 minutes
-                needs_sync = True
-
-        if needs_sync:
-            # Run background sync inside Flask application context
-            def run_sync_in_bg(app_context, user_id):
-                with app_context:
-                    try:
-                        sync_student_progress(user_id)
-                    except Exception as e:
-                        print(f"Background auto-sync error for user {user_id}: {str(e)}")
-            
-            threading.Thread(
-                target=run_sync_in_bg,
-                args=(app.app_context(), current_user.id)
-            ).start()
+    # Auto-sync check disabled for manual testing as requested
+    # if current_user.leetcode_username:
+    #     import threading
+    #     now = datetime.datetime.utcnow()
+    #     needs_sync = False
+    #     if not current_user.last_synced_at:
+    #         needs_sync = True
+    #     else:
+    #         diff = now - current_user.last_synced_at
+    #         if diff.total_seconds() > 900:  # 15 minutes
+    #             needs_sync = True
+    #
+    #     if needs_sync:
+    #         # Run background sync inside Flask application context
+    #         def run_sync_in_bg(app_context, user_id):
+    #             with app_context:
+    #                 try:
+    #                     sync_student_progress(user_id)
+    #                 except Exception as e:
+    #                     print(f"Background auto-sync error for user {user_id}: {str(e)}")
+    #         
+    #         threading.Thread(
+    #             target=run_sync_in_bg,
+    #             args=(app.app_context(), current_user.id)
+    #         ).start()
 
     # Student might belong to multiple batches
     batches = current_user.enrolled_batches.all()
