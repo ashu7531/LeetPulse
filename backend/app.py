@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from models import db, User, Batch, Assignment, AssignmentProblem, StudentProgress
-from tasks import sync_student_progress, send_email_via_resend
+from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details
 import jwt
 import datetime
 import os
@@ -294,6 +294,74 @@ def publish_assignment(current_user, batch_id):
         send_email_via_resend(student.email, f"New Assignment: {title}", email_body)
 
     return jsonify(new_assignment.to_dict()), 201
+
+@app.route("/api/teacher/assignments/<int:assignment_id>/progress", methods=["GET"])
+@token_required
+@roles_allowed("TEACHER")
+def get_assignment_progress(current_user, assignment_id):
+    assignment = Assignment.query.get(assignment_id)
+    if not assignment:
+        return jsonify({"message": "Assignment not found!"}), 404
+        
+    batch = Batch.query.filter_by(id=assignment.batch_id, teacher_id=current_user.id).first()
+    if not batch:
+        return jsonify({"message": "Access denied!"}), 403
+        
+    problems = [prob.to_dict() for prob in assignment.problems]
+    
+    student_progress = []
+    for student in batch.students:
+        progress_dict = {}
+        for prob in assignment.problems:
+            record = StudentProgress.query.filter_by(
+                student_id=student.id,
+                assignment_problem_id=prob.id
+            ).first()
+            if record:
+                progress_dict[prob.id] = {
+                    "status": record.status,
+                    "solved_at": record.solved_at.isoformat() if record.solved_at else None
+                }
+            else:
+                progress_dict[prob.id] = {
+                    "status": "PENDING",
+                    "solved_at": None
+                }
+                
+        student_progress.append({
+            "student_id": student.id,
+            "username": student.username,
+            "email": student.email,
+            "leetcode_username": student.leetcode_username,
+            "progress": progress_dict
+        })
+        
+    return jsonify({
+        "assignment": assignment.to_dict(),
+        "problems": problems,
+        "student_progress": student_progress
+    }), 200
+
+@app.route("/api/teacher/problem-details", methods=["GET"])
+@token_required
+@roles_allowed("TEACHER")
+def get_leetcode_problem_details(current_user):
+    slug = request.args.get("slug")
+    if not slug:
+        return jsonify({"message": "Slug parameter is required!"}), 400
+        
+    slug = slug.strip()
+    if "leetcode.com/problems/" in slug:
+        import re
+        match = re.search(r"leetcode\.com/problems/([^/]+)", slug)
+        if match:
+            slug = match.group(1)
+            
+    details = fetch_leetcode_problem_details(slug)
+    if not details:
+        return jsonify({"message": "Problem not found on LeetCode!"}), 404
+        
+    return jsonify(details), 200
 
 # Calculate leaderboard rankings for a batch
 def get_leaderboard_data(batch_id):

@@ -132,3 +132,36 @@ def sync_all_active_students():
         except Exception as e:
             print(f"Error syncing student {student.username}: {str(e)}")
     return total_synced
+
+# Fetch LeetCode problem details (title, difficulty, questionId) by slug
+def fetch_leetcode_problem_details(title_slug):
+    url = "https://leetcode.com/graphql"
+    query = """
+    query questionTitle($titleSlug: String!) {
+      question(titleSlug: $titleSlug) {
+        questionId
+        title
+        difficulty
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "titleSlug": title_slug
+        }
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            data = response.json().get("data", {}).get("question")
+            if data:
+                return {
+                    "problem_id": data.get("questionId"),
+                    "title": data.get("title"),
+                    "difficulty": data.get("difficulty")
+                }
+        return None
+    except Exception as e:
+        print(f"Error fetching problem details for {title_slug}: {str(e)}")
+        return None

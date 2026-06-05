@@ -32,10 +32,13 @@ const TeacherDashboard: React.FC = () => {
   
   // Problems inside current assignment creation
   const [problemsList, setProblemsList] = useState<{ problem_id: string; title: string; title_slug: string; difficulty: 'Easy' | 'Medium' | 'Hard' }[]>([]);
-  const [currentProbId, setCurrentProbId] = useState('');
-  const [currentProbTitle, setCurrentProbTitle] = useState('');
   const [currentProbSlug, setCurrentProbSlug] = useState('');
-  const [currentProbDiff, setCurrentProbDiff] = useState<'Easy' | 'Medium' | 'Hard'>('Easy');
+  const [problemLookupLoading, setProblemLookupLoading] = useState(false);
+
+  // Assignment Progress Detail Modal States
+  const [selectedProgressAssignment, setSelectedProgressAssignment] = useState<Assignment | null>(null);
+  const [assignmentProgress, setAssignmentProgress] = useState<any | null>(null);
+  const [loadingProgress, setLoadingProgress] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -117,13 +120,13 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
-  const handleAddProblemToDraft = () => {
-    if (!currentProbSlug || !currentProbTitle) {
-      setError('Please provide a title and slug.');
+  const handleAddProblemToDraft = async () => {
+    if (!currentProbSlug) {
+      setError('Please provide a LeetCode Slug or URL.');
       return;
     }
 
-    // Helper to extract slug from URL if pasted
+    // Extract clean slug if full URL is pasted
     let slug = currentProbSlug.trim();
     if (slug.includes('leetcode.com/problems/')) {
       const match = slug.match(/leetcode\.com\/problems\/([^/]+)/);
@@ -132,19 +135,41 @@ const TeacherDashboard: React.FC = () => {
       }
     }
 
-    const newProb = {
-      problem_id: currentProbId.trim() || String(Date.now()), // fallback ID
-      title: currentProbTitle.trim(),
-      title_slug: slug,
-      difficulty: currentProbDiff
-    };
-
-    setProblemsList([...problemsList, newProb]);
-    setCurrentProbId('');
-    setCurrentProbTitle('');
-    setCurrentProbSlug('');
-    setCurrentProbDiff('Easy');
+    setProblemLookupLoading(true);
     setError('');
+    try {
+      const res = await api.get(`/teacher/problem-details?slug=${encodeURIComponent(slug)}`);
+      const details = res.data;
+
+      const newProb = {
+        problem_id: String(details.problem_id) || String(Date.now()),
+        title: details.title,
+        title_slug: slug,
+        difficulty: details.difficulty as 'Easy' | 'Medium' | 'Hard'
+      };
+
+      setProblemsList([...problemsList, newProb]);
+      setCurrentProbSlug('');
+      setError('');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Could not fetch problem details from LeetCode. Double check the slug/URL.');
+    } finally {
+      setProblemLookupLoading(false);
+    }
+  };
+
+  const handleViewAssignmentProgress = async (assignment: Assignment) => {
+    setSelectedProgressAssignment(assignment);
+    setLoadingProgress(true);
+    setAssignmentProgress(null);
+    try {
+      const res = await api.get(`/teacher/assignments/${assignment.id}/progress`);
+      setAssignmentProgress(res.data);
+    } catch (err) {
+      console.error('Error fetching assignment progress:', err);
+    } finally {
+      setLoadingProgress(false);
+    }
   };
 
   const handleRemoveProblemFromDraft = (index: number) => {
@@ -349,9 +374,13 @@ const TeacherDashboard: React.FC = () => {
                   ) : (
                     <div className="divide-y divide-white/5">
                       {batchAssignments.map((assign) => (
-                        <div key={assign.id} className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+                        <div 
+                          key={assign.id} 
+                          onClick={() => handleViewAssignmentProgress(assign)}
+                          className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-4 cursor-pointer group hover:bg-white/5 px-4 rounded-xl -mx-4 transition-all"
+                        >
                           <div>
-                            <h3 className="font-semibold text-white text-base">{assign.title}</h3>
+                            <h3 className="font-semibold text-white text-base group-hover:text-indigo-400 transition-colors">{assign.title}</h3>
                             <p className="text-xs text-gray-400 mt-1 line-clamp-1">{assign.description}</p>
                             <span className="inline-flex items-center gap-1 text-[10px] text-indigo-400 font-medium mt-2">
                               <Calendar size={10} />
@@ -359,10 +388,13 @@ const TeacherDashboard: React.FC = () => {
                             </span>
                           </div>
                           
-                          <div className="text-right">
-                            <span className="block text-xs font-bold text-white">
-                              {assign.total_problems || 0} Problems
-                            </span>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <span className="block text-xs font-bold text-white">
+                                {assign.total_problems || 0} Problems
+                              </span>
+                            </div>
+                            <ChevronRight size={16} className="text-gray-500 group-hover:text-indigo-400 transition-colors" />
                           </div>
                         </div>
                       ))}
@@ -635,42 +667,25 @@ const TeacherDashboard: React.FC = () => {
                 )}
 
                 {/* Form to add problem to draft list */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end p-4 bg-slate-900/40 border border-white/5 rounded-2xl">
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Title & Slug/URL</label>
+                <div className="flex flex-col md:flex-row gap-3 items-end p-4 bg-slate-900/40 border border-white/5 rounded-2xl">
+                  <div className="flex-1 w-full">
+                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">LeetCode Problem Slug or URL</label>
                     <input
                       type="text"
-                      placeholder="Title (e.g. Two Sum)"
-                      value={currentProbTitle}
-                      onChange={(e) => setCurrentProbTitle(e.target.value)}
-                      className="w-full px-3.5 py-2 mb-2 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Slug/URL (e.g. two-sum)"
+                      placeholder="e.g. two-sum or https://leetcode.com/problems/two-sum"
                       value={currentProbSlug}
                       onChange={(e) => setCurrentProbSlug(e.target.value)}
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Difficulty</label>
-                    <select
-                      value={currentProbDiff}
-                      onChange={(e) => setCurrentProbDiff(e.target.value as any)}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-white/5 rounded-lg text-xs text-white focus:outline-none"
-                    >
-                      <option value="Easy">Easy</option>
-                      <option value="Medium">Medium</option>
-                      <option value="Hard">Hard</option>
-                    </select>
                   </div>
                   <button
                     type="button"
+                    disabled={problemLookupLoading}
                     onClick={handleAddProblemToDraft}
-                    className="w-full py-2 bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 font-semibold rounded-lg text-xs flex items-center justify-center gap-1"
+                    className="w-full md:w-auto px-5 py-2.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
                   >
-                    <PlusCircle size={14} /> Add
+                    <PlusCircle size={14} /> 
+                    {problemLookupLoading ? 'Fetching...' : 'Fetch & Add'}
                   </button>
                 </div>
               </div>
@@ -692,6 +707,118 @@ const TeacherDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL: Assignment Progress Matrix */}
+      {selectedProgressAssignment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-4xl bg-[#0f172a] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+            <div className="p-6 bg-slate-900 border-b border-white/5 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold text-white m-0">
+                  Assignment Progress: {selectedProgressAssignment.title}
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Deadline: {new Date(selectedProgressAssignment.deadline).toLocaleString()}
+                </p>
+              </div>
+              <button 
+                onClick={() => setSelectedProgressAssignment(null)} 
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-x-auto max-h-[70vh]">
+              {loadingProgress ? (
+                <div className="py-20 text-center text-gray-400 text-sm flex flex-col items-center justify-center gap-3">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Fetching progress matrix...</span>
+                </div>
+              ) : assignmentProgress ? (
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-white/5 bg-slate-900/40">
+                      <th className="py-3 px-4 font-semibold text-gray-400">Student</th>
+                      <th className="py-3 px-4 font-semibold text-gray-400">LeetCode Username</th>
+                      {assignmentProgress.problems.map((prob: any) => (
+                        <th key={prob.id} className="py-3 px-4 font-semibold text-gray-400">
+                          <span className="block">{prob.title}</span>
+                          <span className={`text-[10px] uppercase font-bold ${
+                            prob.difficulty === 'Easy' ? 'text-green-400' : prob.difficulty === 'Medium' ? 'text-yellow-400' : 'text-red-400'
+                          }`}>
+                            {prob.difficulty}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {assignmentProgress.student_progress.length === 0 ? (
+                      <tr>
+                        <td colSpan={2 + assignmentProgress.problems.length} className="py-8 text-center text-gray-500">
+                          No students currently enrolled in this batch.
+                        </td>
+                      </tr>
+                    ) : (
+                      assignmentProgress.student_progress.map((student: any) => (
+                        <tr key={student.student_id} className="hover:bg-white/5">
+                          <td className="py-4 px-4">
+                            <span className="font-semibold text-white block">{student.username}</span>
+                            <span className="text-gray-500 text-[10px]">{student.email}</span>
+                          </td>
+                          <td className="py-4 px-4 font-medium text-gray-400">
+                            {student.leetcode_username ? (
+                              <span className="text-indigo-400">{student.leetcode_username}</span>
+                            ) : (
+                              <span className="text-red-400/80 italic text-[10px]">Not linked</span>
+                            )}
+                          </td>
+                          {assignmentProgress.problems.map((prob: any) => {
+                            const prog = student.progress[prob.id] || { status: 'PENDING', solved_at: null };
+                            return (
+                              <td key={prob.id} className="py-4 px-4">
+                                <div className="flex flex-col gap-1">
+                                  <span className={`inline-flex w-fit px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                    prog.status === 'ON_TIME'
+                                      ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                      : prog.status === 'LATE'
+                                      ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
+                                      : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                  }`}>
+                                    {prog.status === 'ON_TIME' ? 'On Time' : prog.status === 'LATE' ? 'Late' : 'Pending'}
+                                  </span>
+                                  {prog.solved_at && (
+                                    <span className="text-[9px] text-gray-500">
+                                      {new Date(prog.solved_at).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="py-12 text-center text-red-400 text-sm">
+                  Failed to load assignment progress details.
+                </div>
+              )}
+            </div>
+            
+            <div className="p-6 bg-slate-900 border-t border-white/5 flex justify-end">
+              <button 
+                onClick={() => setSelectedProgressAssignment(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold rounded-lg text-xs"
+              >
+                Close View
+              </button>
+            </div>
           </div>
         </div>
       )}

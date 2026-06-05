@@ -146,23 +146,42 @@ const StudentDashboard: React.FC = () => {
             )}
           </div>
           
-          <form onSubmit={handleLinkLeetCode} className="flex items-center gap-3 w-full md:w-auto">
-            <input
-              type="text"
-              value={leetcodeUsername}
-              onChange={(e) => setLeetcodeUsername(e.target.value)}
-              placeholder="LeetCode Username"
-              required
-              className="flex-1 md:w-48 px-3.5 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            />
-            <button
-              type="submit"
-              disabled={linkLoading}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50"
-            >
-              {linkLoading ? 'Saving...' : 'Link Profile'}
-            </button>
-          </form>
+          {currentUser?.leetcode_username ? (
+            <div className="flex items-center gap-4 bg-indigo-500/10 border border-indigo-500/20 px-5 py-3.5 rounded-xl">
+              <div>
+                <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block">Connected Profile</span>
+                <span className="text-sm text-white font-bold">{currentUser.leetcode_username}</span>
+              </div>
+              <button
+                onClick={() => {
+                  // Temporarily clear to show form
+                  setCurrentUser({ ...currentUser, leetcode_username: undefined });
+                  setLeetcodeUsername('');
+                }}
+                className="text-xs font-semibold text-gray-400 hover:text-white underline cursor-pointer"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleLinkLeetCode} className="flex items-center gap-3 w-full md:w-auto">
+              <input
+                type="text"
+                value={leetcodeUsername}
+                onChange={(e) => setLeetcodeUsername(e.target.value)}
+                placeholder="LeetCode Username"
+                required
+                className="flex-1 md:w-48 px-3.5 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+              />
+              <button
+                type="submit"
+                disabled={linkLoading}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50"
+              >
+                {linkLoading ? 'Saving...' : 'Link Profile'}
+              </button>
+            </form>
+          )}
         </div>
 
         {/* Dashboard Grid */}
