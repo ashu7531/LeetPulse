@@ -15,7 +15,6 @@ const StudentDashboard: React.FC = () => {
   
   const [leetcodeUsername, setLeetcodeUsername] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
-  const [syncLoading, setSyncLoading] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -32,12 +31,15 @@ const StudentDashboard: React.FC = () => {
   const fetchDashboardData = async () => {
     setDataLoading(true);
     try {
-      const [assignmentsRes, leaderboardRes] = await Promise.all([
+      const [assignmentsRes, leaderboardRes, meRes] = await Promise.all([
         api.get('/student/assignments'),
         api.get('/student/leaderboard'),
+        api.get('/auth/me'),
       ]);
       setAssignments(assignmentsRes.data);
       setLeaderboard(leaderboardRes.data);
+      setCurrentUser(meRes.data);
+      localStorage.setItem('user', JSON.stringify(meRes.data));
     } catch (err: any) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -66,35 +68,7 @@ const StudentDashboard: React.FC = () => {
     }
   };
 
-  const handleSyncProgress = async () => {
-    if (!currentUser?.leetcode_username) {
-      setMessage({ text: 'Please link your LeetCode username first.', type: 'error' });
-      return;
-    }
-    setSyncLoading(true);
-    setMessage(null);
-    try {
-      const res = await api.post('/student/sync-progress');
-      setMessage({ text: `Sync complete! Synced: ${res.data.synced_count} problems.`, type: 'success' });
-      fetchDashboardData();
-      // If we have an assignment open, refresh it as well
-      if (selectedAssignment) {
-        const refreshed = assignments.find(a => a.assignment_id === selectedAssignment.assignment_id);
-        if (refreshed) {
-          // Re-fetch the individual assignment to get its updated problems list
-          const detailedRes = await api.get(`/student/assignments/${selectedAssignment.assignment_id}`);
-          setSelectedAssignment(detailedRes.data);
-        }
-      }
-    } catch (err: any) {
-      setMessage({ 
-        text: err.response?.data?.message || 'Failed to sync with LeetCode.', 
-        type: 'error' 
-      });
-    } finally {
-      setSyncLoading(false);
-    }
-  };
+
 
   const openAssignmentDetails = async (assignment: StudentAssignmentProgress) => {
     try {
@@ -150,57 +124,45 @@ const StudentDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Top Section: LeetCode profile linking & sync */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <div className="lg:col-span-2 glass-card rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2 m-0">
-                <LinkIcon className="text-indigo-400" size={20} />
-                LeetCode Profile Link
-              </h2>
-              <p className="text-sm text-gray-400 max-w-lg">
-                Link your username. The platform periodically scrapes your recent submissions to mark solved problems as On Time or Late automatically.
-              </p>
-            </div>
-            
-            <form onSubmit={handleLinkLeetCode} className="flex items-center gap-3 w-full md:w-auto">
-              <input
-                type="text"
-                value={leetcodeUsername}
-                onChange={(e) => setLeetcodeUsername(e.target.value)}
-                placeholder="LeetCode Username"
-                required
-                className="flex-1 md:w-48 px-3.5 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-              />
-              <button
-                type="submit"
-                disabled={linkLoading}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50"
-              >
-                {linkLoading ? 'Saving...' : 'Link'}
-              </button>
-            </form>
+        {/* Top Section: LeetCode profile linking */}
+        <div className="glass-card rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2 m-0">
+              <LinkIcon className="text-indigo-400" size={20} />
+              LeetCode Integration
+            </h2>
+            <p className="text-sm text-gray-400 max-w-2xl">
+              Link your username. The platform automatically syncs your progress (checks on load maximum once every 15 minutes).
+            </p>
+            {currentUser?.leetcode_username && (
+              <div className="text-xs text-indigo-400 font-semibold flex items-center gap-1.5 mt-2">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                {currentUser.last_synced_at ? (
+                  <span>Last auto-synced: {new Date(currentUser.last_synced_at).toLocaleString()}</span>
+                ) : (
+                  <span>First sync in progress... refresh in a few seconds!</span>
+                )}
+              </div>
+            )}
           </div>
-
-          <div className="glass-card rounded-2xl p-6 flex flex-col justify-between gap-4">
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2 m-0">
-                <RefreshCw className="text-purple-400" size={20} />
-                Instant Progress Sync
-              </h2>
-              <p className="text-xs text-gray-400">
-                Sync now to fetch your latest submissions.
-              </p>
-            </div>
+          
+          <form onSubmit={handleLinkLeetCode} className="flex items-center gap-3 w-full md:w-auto">
+            <input
+              type="text"
+              value={leetcodeUsername}
+              onChange={(e) => setLeetcodeUsername(e.target.value)}
+              placeholder="LeetCode Username"
+              required
+              className="flex-1 md:w-48 px-3.5 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+            />
             <button
-              onClick={handleSyncProgress}
-              disabled={syncLoading || !currentUser?.leetcode_username}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold rounded-xl text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              type="submit"
+              disabled={linkLoading}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition-all disabled:opacity-50"
             >
-              <RefreshCw size={16} className={syncLoading ? 'animate-spin' : ''} />
-              {syncLoading ? 'Synchronizing...' : 'Sync Solved Problems'}
+              {linkLoading ? 'Saving...' : 'Link Profile'}
             </button>
-          </div>
+          </form>
         </div>
 
         {/* Dashboard Grid */}

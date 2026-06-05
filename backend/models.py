@@ -20,6 +20,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default='STUDENT')  # 'TEACHER' or 'STUDENT'
     leetcode_username = db.Column(db.String(100), nullable=True)
+    last_synced_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -40,6 +41,7 @@ class User(db.Model):
             'email': self.email,
             'role': self.role,
             'leetcode_username': self.leetcode_username,
+            'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'created_at': self.created_at.isoformat()
         }
 

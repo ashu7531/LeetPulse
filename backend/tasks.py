@@ -116,8 +116,8 @@ def sync_student_progress(student_id):
             record.solved_at = solved_at_time
             synced_count += 1
             
-    if synced_count > 0:
-        db.session.commit()
+    student.last_synced_at = datetime.datetime.utcnow()
+    db.session.commit()
         
     return synced_count
 

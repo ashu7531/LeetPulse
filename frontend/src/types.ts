@@ -6,6 +6,7 @@ export interface User {
   email: string;
   role: UserRole;
   leetcode_username?: string;
+  last_synced_at?: string;
   created_at: string;
 }
 
