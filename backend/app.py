@@ -52,7 +52,7 @@ celery.conf.beat_schedule = {
 }
 
 # Import tasks AFTER celery initialization to avoid circular imports
-from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile, sync_all_active_students_task, sync_student_progress_task
+from tasks import send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile, sync_all_active_students_task, sync_student_progress_task
 
 # Ensure tables are created on startup (runs under gunicorn and direct execution)
 with app.app_context():
