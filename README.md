@@ -17,15 +17,16 @@ LeetPulse is a specialized Learning Management System (LMS) designed specificall
 
 * **Automated Progress Verification:** Directly scrapes LeetCode's GraphQL API to verify if a student actually solved a required problem before the deadline.
 * **Smart Cooldown Syncing:** Allows students to manually push their progress for instant gratification, but enforces a 10-minute API cooldown to prevent rate-limiting.
-* **Invisible Background Cron Jobs:** Utilizes an in-app `APScheduler` to silently sync all active students' LeetCode stats every 6 hours, ensuring the teacher's dashboard is fresh every morning.
-* **Zero-Cost Architecture:** Designed explicitly to run on a $0/month budget using Vercel, Hugging Face Docker Spaces, and Neon PostgreSQL.
+* **Invisible Background Cron Jobs:** Utilizes a distributed `Celery Beat` scheduler to silently sync all active students' LeetCode stats every 6 hours in the background.
+* **Distributed Microservices:** Decouples the API from background tasks using Aiven Redis, ensuring the API stays lightning fast even during massive data syncs.
+* **Zero-Cost Architecture:** Designed explicitly to run on a $0/month budget using Vercel, Hugging Face Docker Spaces, Aiven, Render, and Neon PostgreSQL.
 
 ---
 
 ## 🛠 Tech Stack
 
 * **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
-* **Backend:** Python, Flask, SQLAlchemy, APScheduler
+* **Backend:** Python, Flask, SQLAlchemy, Celery, Redis
 * **Database:** PostgreSQL (Neon Serverless)
 * **Authentication:** JWT (JSON Web Tokens)
 * **DevOps:** Docker Compose (Local), GitHub Actions (CI/CD)
@@ -75,14 +76,25 @@ docker compose up --build
 
 This project is fully automated for zero-cost deployment using GitHub Actions. For a highly detailed explanation of the architecture, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-### 1. Backend (Hugging Face Spaces)
+### 1. Database & Message Broker
+1. Create a free Serverless Postgres database on [Neon.tech](https://neon.tech).
+2. Create a free Redis instance on [Aiven](https://aiven.io).
+
+### 2. Backend API Node (Hugging Face Spaces)
 1. Create a new Space on [Hugging Face](https://huggingface.co/spaces) (SDK: **Docker**, Hardware: Free).
 2. Go to your Space Settings -> Variables and Secrets.
-3. Add `DATABASE_URL` (your Neon string) and `JWT_SECRET`.
+3. Add `DATABASE_URL` (your Neon string), `REDIS_URL` (your Aiven string), and `JWT_SECRET`.
 4. Go to your Hugging Face Profile Settings -> Access Tokens. Create a token with **Write** permissions.
 5. In this GitHub Repository, go to **Settings -> Secrets and variables -> Actions**.
 6. Add a new secret named `HF_TOKEN` with your Hugging Face token.
 7. Any code pushed to the `main` branch will automatically be built and deployed to Hugging Face!
+
+### 3. Background Worker Node (Render)
+1. Create a new **Web Service** on [Render](https://render.com) pointing to this GitHub repository.
+2. Set the Root Directory to `backend` and select the **Docker** environment.
+3. Under **Docker Command**, enter `bash start.sh` (this safely runs the dummy server and Celery together).
+4. Add the exact same `DATABASE_URL`, `REDIS_URL`, and `JWT_SECRET` environment variables.
+5. Once deployed, set up a free 10-minute ping on [cron-job.org](https://cron-job.org) pointing to your Render URL's root (`/`) to permanently prevent Render from sleeping!
 
 ### 2. Frontend (Vercel)
 1. Go to [Vercel](https://vercel.com) and import this repository.

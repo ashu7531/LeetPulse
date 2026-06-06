@@ -1,10 +1,10 @@
 # LeetPulse Architecture
 
-This document provides a comprehensive, highly detailed technical overview of the LeetPulse platform architecture, detailing exactly how every single component communicates, where data is stored, and where the code is hosted in production.
+This document provides a comprehensive, highly detailed technical overview of the LeetPulse platform architecture. It details exactly how every single component communicates, the step-by-step flow of data, and the reasoning behind each technology choice in our distributed microservice system.
 
 ## 1. High-Level Architecture Diagram
 
-The following diagram illustrates the flow of data across the Client, Frontend Hosting, Backend API, Database, and External Services.
+The following diagram illustrates the decoupled flow of data across the Frontend, API Node, Message Broker, Background Worker, and Database.
 
 ```mermaid
 graph TD
@@ -18,13 +18,30 @@ graph TD
         Static["Vercel Edge CDN\n(Serves HTML, JS, CSS)"]
     end
 
-    %% Backend Hosting
-    subgraph HF ["Backend Hosting (Hugging Face Spaces)"]
-        subgraph Docker ["Docker Container (Gunicorn)"]
-            Flask["Flask REST API\n(Controllers & Routes)"]
-            Auth["JWT Authentication\nMiddleware"]
-            Scheduler["APScheduler\n(Background Cron Job)"]
+    %% API Node Hosting
+    subgraph HF ["API Node (Hugging Face Spaces)"]
+        subgraph HFDocker ["Docker Container"]
+            Flask["Flask REST API\n(Handles Requests & Auth)"]
         end
+    end
+
+    %% Message Broker
+    subgraph Aiven ["Message Queue (Aiven)"]
+        Redis[(Redis Server\nTask Queue)]
+    end
+
+    %% Background Worker Hosting
+    subgraph Render ["Worker Node (Render)"]
+        subgraph RenderDocker ["Docker Container"]
+            Celery["Celery Worker\n(Executes Heavy Tasks)"]
+            Beat["Celery Beat\n(6-Hour Cron Scheduler)"]
+            Dummy["Dummy HTTP Server\n(Keeps Render Awake)"]
+        end
+    end
+
+    %% Keep-Alive Service
+    subgraph CronJob ["External Keep-Alive"]
+        Pinger["cron-job.org\n(10-Min Pings)"]
     end
 
     %% Data Tier
@@ -34,90 +51,98 @@ graph TD
 
     %% External APIs
     subgraph External ["External Services"]
-        LC["LeetCode GraphQL API\n(User Stats & Submissions)"]
-        Resend["Resend API\n(Email Notifications)"]
+        LC["LeetCode GraphQL API"]
     end
 
     %% Connections
     Client -- "1. Request Site" --> Vercel
-    Vercel -- "2. Deliver Static Assets" --> Client
+    Vercel -- "2. Deliver UI" --> Client
     
-    Client -- "3. REST API Calls (JSON/JWT)" --> Auth
-    Auth -- "Validate Token" --> Flask
+    Client -- "3. REST API Calls" --> Flask
+    Flask -- "4. Read/Write Simple Data" --> PG
     
-    Flask -- "4. Read/Write Data (SQLAlchemy)" --> PG
-    Scheduler -- "5. Background Sync (Every 6 hours)" --> Flask
+    Flask -- "5. Push Heavy Task (Sync)" --> Redis
+    Celery -- "6. Pull Task from Queue" --> Redis
     
-    Flask -- "6. Fetch Student Progress" --> LC
-    Scheduler -- "7. Automated Leaderboard Refresh" --> LC
+    Beat -- "7. Push Scheduled Tasks" --> Redis
     
-    Flask -. "8. Send Alerts (Optional)" .-> Resend
+    Celery -- "8. Scrape Stats" --> LC
+    Celery -- "9. Save Progress" --> PG
+    
+    Pinger -- "10. HTTP Ping (Prevent Sleep)" --> Dummy
 
     %% Styling
     classDef frontend fill:#000000,stroke:#ffffff,stroke-width:2px,color:#ffffff;
     classDef backend fill:#FFD21E,stroke:#000000,stroke-width:2px,color:#000000;
+    classDef broker fill:#D82C20,stroke:#000000,stroke-width:2px,color:#ffffff;
+    classDef worker fill:#8E44AD,stroke:#ffffff,stroke-width:2px,color:#ffffff;
     classDef db fill:#00E699,stroke:#000000,stroke-width:2px,color:#000000;
     classDef external fill:#F7931A,stroke:#000000,stroke-width:2px,color:#000000;
     
     class Vercel,Static frontend;
-    class HF,Docker,Flask,Auth,Scheduler backend;
+    class HF,HFDocker,Flask backend;
+    class Aiven,Redis broker;
+    class Render,RenderDocker,Celery,Beat,Dummy worker;
     class Database,PG db;
-    class External,LC,Resend external;
+    class External,LC,Pinger external;
 ```
 
 ---
 
-## 2. Component Deep-Dive
+## 2. Component Deep-Dive & Connection Flow
+
+This architecture is broken down into specific microservices, ensuring that heavy background tasks do not slow down the user experience. 
 
 ### A. The Frontend (Vercel)
-**Technology:** React 18, TypeScript, Vite, Tailwind CSS, Lucide React (Icons).
-**Hosting:** Vercel (Production) / Vite Dev Server (Local).
-**Purpose:** Handles all user interface interactions. It is a Single Page Application (SPA).
-**How it connects:**
-- Vercel strictly serves static files (`index.html`, JavaScript bundles). It executes *no backend logic*.
-- We use a `vercel.json` file with a "rewrite" rule. If a user manually refreshes `/student`, Vercel serves `index.html` and lets React Router handle the URL.
-- It communicates with the backend via `axios`. It pulls the backend URL dynamically using the `VITE_API_URL` environment variable.
+* **Technology:** React 18, TypeScript, Vite, Tailwind CSS.
+* **Purpose:** Handles all user interface interactions and displays data instantly.
+* **How it connects:** It is a Single Page Application (SPA). Vercel acts strictly as a global CDN to deliver the HTML/JS/CSS files to the user's browser. The browser then makes HTTP requests directly to the Hugging Face API Node.
+* **Why Vercel?** Best-in-class global CDN, instant deployments, and an excellent free tier for static assets.
 
-### B. The Backend API (Hugging Face Spaces)
-**Technology:** Python, Flask, Flask-CORS, PyJWT, SQLAlchemy.
-**Hosting:** Hugging Face Spaces (Docker SDK tier - 16GB RAM Free).
-**Purpose:** Acts as the brain of the application. It secures data, validates business logic, and orchestrates background jobs.
-**How it connects:**
-- Hugging Face automatically reads the `backend/Dockerfile`, installs `requirements.txt`, and spins up a Gunicorn web server mapped to port `7860`.
-- **Authentication:** All protected routes are wrapped in a `@token_required` decorator. When a user logs in, Flask creates a JWT (JSON Web Token) signed with `JWT_SECRET`. The frontend stores this token and passes it in the `Authorization` header of every subsequent API call.
+### B. The API Node (Hugging Face Spaces)
+* **Technology:** Python, Flask, Flask-CORS, PyJWT, SQLAlchemy.
+* **Purpose:** The traffic controller. It authenticates users, serves quick database queries (like viewing the dashboard), and delegates heavy work.
+* **How it connects:** 
+  * Connects to the **Neon Database** directly to fetch basic user data.
+  * When a user clicks "Sync LeetCode Status", Flask does **not** do the heavy scraping. Instead, it writes a small message (e.g., "Task: Sync Student 123") and pushes it to the **Aiven Redis Queue**, then immediately replies `200 OK` to the frontend so the user doesn't have to wait.
+* **Why Hugging Face?** Offers a massive 16GB of RAM and 2 vCPUs completely for free on their Docker tier, which is perfect for a robust, high-traffic API node.
 
-### C. The Background Scheduler (In-App Cron)
-**Technology:** APScheduler (Advanced Python Scheduler).
-**Location:** Runs as a background thread directly inside the Flask container.
-**Purpose:** Eliminates the need for expensive external task queues (like Celery + Redis). 
-**How it connects:**
-- When Flask boots up, it starts the `BackgroundScheduler`.
-- Every 6 hours, it automatically fires `sync_all_active_students()`.
-- This function queries the Neon database for all users, makes requests to the LeetCode API to get their fresh stats, and saves the new data back to Neon. This ensures the Teacher's leaderboard is always fresh without students having to click the "Sync" button.
+### C. The Message Broker (Aiven Redis)
+* **Technology:** Redis.
+* **Purpose:** The "Waiting Room" for tasks. It safely holds tasks pushed by the API Node until the Worker Node is ready to process them.
+* **Why Aiven?** Aiven provides a highly secure, managed Redis instance with a generous free tier. Using a centralized Redis queue allows us to decouple the API from the Worker—if 1,000 students click "Sync" at the same time, the API won't crash; the tasks just sit securely in Redis until processed.
 
-### D. The Database (Neon.tech)
-**Technology:** Serverless PostgreSQL.
-**Hosting:** Neon.tech (Free Tier).
-**Purpose:** The single source of truth for all persistent state.
-**How it connects:**
-- Flask connects to Neon using `SQLAlchemy` and the `psycopg2` driver.
-- The connection is established via the `DATABASE_URL` environment variable injected securely into the Hugging Face space.
-- Contains normalized relational tables: `users` (Teacher/Student), `batches`, `assignments`, `assignment_problems`, and `student_progress` (which tracks `PENDING`, `ON_TIME`, `LATE`, `MISSED` states).
+### D. The Worker Node (Render)
+* **Technology:** Celery, Celery Beat, Python 3.10.
+* **Purpose:** The heavy lifter. It asynchronously processes the heavy LeetCode scraping tasks without freezing the API.
+* **How it connects:**
+  * **Celery Worker:** Constantly listens to the **Aiven Redis** queue. When it sees a task, it pulls it, connects to the LeetCode GraphQL API to scrape data, and writes the results to the **Neon Database**.
+  * **Celery Beat:** An internal alarm clock. Every 6 hours, it automatically generates "Sync All Students" tasks and pushes them into Redis for the worker to process.
+* **Why Render?** Excellent free-tier Docker hosting that allows us to run custom long-running background processes (Celery). 
 
-### E. External Data Scraping (LeetCode API)
-**Technology:** GraphQL over HTTP.
-**Purpose:** Tracking student progress automatically without relying on their honesty.
-**How it connects:**
-- The Flask backend sends POST requests to `https://leetcode.com/graphql` querying the `userRecentSubmissions` and `userProblemsSolved` endpoints.
-- It parses the JSON response to calculate global leaderboard scores and match submitted problem slugs to active assignment deadlines.
+### E. The Free-Tier Keep-Alive Hack (cron-job.org)
+* **The Problem:** Render forces free "Web Services" to sleep after 15 minutes of inactivity. If the worker sleeps, automated background syncs stop working.
+* **The Solution:** We run a tiny `python -m http.server` in the background on Render alongside Celery. We then use **cron-job.org** to send an HTTP ping to this dummy server every 10 minutes.
+* **Why?** Render sees this HTTP ping as "active web traffic", completely resetting the 15-minute sleep timer. This effectively gives us a 24/7 constantly-awake Background Worker for $0.00.
+
+### F. The Database (Neon.tech)
+* **Technology:** Serverless PostgreSQL, SQLAlchemy, Psycopg (v3).
+* **Purpose:** The single source of truth for persistent state (users, assignments, progress).
+* **Why Neon?** Separates storage and compute. It is a modern, serverless Postgres provider that scales instantly to zero and offers a massive free tier, making it the perfect central database for a distributed architecture.
 
 ---
 
-## 3. Why This Architecture Was Chosen (The $0 Production Model)
+## 3. End-to-End Workflow Examples
 
-The primary goal of this architecture was to build a highly scalable, real-time education platform with a **$0.00 monthly operational cost**. 
+### Flow #1: The Manual Sync (User clicks a button)
+1. **Frontend:** Student clicks "Sync LeetCode Status". Vercel sends an HTTP POST request to the Hugging Face API.
+2. **API Node:** Hugging Face receives the request, validates the JWT token, and drops a message into the Aiven Redis queue. It instantly replies "Sync Started" to the Frontend.
+3. **Queue:** Redis holds the task securely.
+4. **Worker Node:** The Render Celery worker grabs the task from Redis, reaches out to LeetCode, parses the GraphQL response, and updates the student's row in the Neon Database.
+5. **Frontend:** The student refreshes their page, and the new data is loaded from Neon.
 
-1. **Why Vercel?** Best-in-class global CDN for React Vite applications. Generous free tier.
-2. **Why Hugging Face?** Traditional free tiers (like Render or Heroku) sleep after 15 minutes of inactivity and offer very little RAM. Hugging Face Spaces (Docker tier) offers a massive 16GB of RAM and 2 vCPUs completely for free, allowing us to run background cron jobs without the server constantly going to sleep.
-3. **Why Neon PostgreSQL?** Neon separates storage and compute. It is a modern, serverless Postgres provider that offers an excellent free tier and integrates natively with Python's SQLAlchemy.
-4. **Why APScheduler instead of Celery/Redis?** Introducing Redis and Celery would require a separate worker server and a separate Redis database (which are rarely free at scale). Because Hugging Face gives us 16GB of RAM, we easily have enough memory to run background threads *inside* the main web server using APScheduler, drastically simplifying deployment and saving money.
+### Flow #2: The Automated Nightly Sync (The Cron Job)
+1. **Worker Node (Beat):** At exactly the 6-hour mark, Celery Beat wakes up inside Render.
+2. **Task Generation:** It looks at the Neon database, finds 100 active students, and throws 100 individual "Sync Student" tasks into the Aiven Redis queue.
+3. **Queue & Worker:** The Celery worker pulls the 100 tasks out of Redis as fast as it can. Because they are in a queue, they are processed reliably in parallel without overwhelming the memory limits of the server.
+4. **Result:** When the Teacher wakes up the next morning, the Vercel frontend dashboard shows 100% accurate, up-to-date data for the entire class.
