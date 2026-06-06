@@ -146,3 +146,34 @@ This architecture is broken down into specific microservices, ensuring that heav
 2. **Task Generation:** It looks at the Neon database, finds 100 active students, and throws 100 individual "Sync Student" tasks into the Aiven Redis queue.
 3. **Queue & Worker:** The Celery worker pulls the 100 tasks out of Redis as fast as it can. Because they are in a queue, they are processed reliably in parallel without overwhelming the memory limits of the server.
 4. **Result:** When the Teacher wakes up the next morning, the Vercel frontend dashboard shows 100% accurate, up-to-date data for the entire class.
+
+---
+
+## 4. Key System Design & Architectural Decisions
+
+When architecting LeetPulse, several key technical decisions were made to elevate the platform from a simple hobby application to an **Enterprise-Grade Distributed System**. Below are the specific trade-offs and reasoning behind these choices:
+
+### A. Distributed Task Queue (Celery + Redis) vs. Simple In-Memory Schedulers (APScheduler)
+**The Easy Option:** Use a simple Python library like `APScheduler` or native Flask threading to run background loops directly inside the API server.
+**Why we rejected it:** 
+1. **API Freezing (The GIL Problem):** Python's Global Interpreter Lock (GIL) means heavy scraping tasks would choke the web server. If APScheduler looped over 500 students, the entire Flask API would freeze, preventing other users from logging in or viewing their dashboards.
+2. **Data Loss:** If the Hugging Face server restarted halfway through a 500-student loop, the remaining 250 tasks would be permanently lost in memory.
+**Our Production Approach:** We introduced **Celery and Aiven Redis**.
+*   **Separation of Concerns:** The API Node instantly delegates tasks to Redis and replies to the user in milliseconds. 
+*   **Zero Data Loss:** Tasks sit safely in the persistent Redis database. If the Render Worker crashes, another worker picks up the exact task from the queue upon reboot.
+*   **Horizontal Scalability:** We can infinitely scale the Worker Nodes on Render without ever touching the API Node.
+
+### B. Distributed Rate Limiting (Protecting External Dependencies)
+**The Easy Option:** Just fire HTTP requests to the LeetCode GraphQL API as fast as possible.
+**Why we rejected it:** External APIs have strict rate limits. Firing 200 simultaneous requests would result in an immediate `429 Too Many Requests` error and a permanent IP ban from LeetCode for our Render server.
+**Our Production Approach:** Celery natively supports distributed rate limiting (`rate_limit='30/m'`). By routing all scraping tasks through the centralized Redis queue, we guarantee that no matter how many Worker machines we spin up, we will never hit LeetCode more than 30 times per minute. This ensures 100% stability and compliance with external API limits.
+
+### C. Stateless JWT Authentication vs. Server-Side Sessions
+**The Easy Option:** Use Flask server-side sessions (cookies) to keep users logged in.
+**Why we rejected it:** In a distributed architecture where the frontend (Vercel) and backend (Hugging Face) live on entirely different domains, managing CORS and cross-site cookies is complex and prone to browser-level security blocks (like Safari's ITP). Furthermore, server-side sessions require storing session data in memory or the database, which hurts scalability.
+**Our Production Approach:** We use **Stateless JSON Web Tokens (JWT)**. The Hugging Face API issues a signed token, and the React frontend stores it in `localStorage`. Every API request includes this token in the `Authorization: Bearer` header. This completely eliminates CORS cookie issues and allows the API to remain perfectly stateless and horizontally scalable.
+
+### D. Registration Spam Prevention (B2B SaaS Security)
+**The Easy Option:** Leave the "Register as Teacher" endpoint completely open to the public.
+**Why we rejected it:** Malicious bots and random users would flood the database with fake teacher accounts, creating empty batches and polluting the platform.
+**Our Production Approach:** We implemented an **Environment-Level Access Code** (`TEACHER_SECRET_CODE`). When someone attempts to register as a Teacher, the backend strictly verifies this code against the live server's environment variables (stored securely in Hugging Face Secrets). This instantly stops 100% of bot spam without requiring the complex engineering overhead of building an "Admin Manual Approval" dashboard.
