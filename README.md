@@ -2,6 +2,7 @@
   <img src="https://img.shields.io/badge/LeetPulse-Platform-4F46E5?style=for-the-badge&logo=react" alt="LeetPulse Logo">
   <h1>LeetPulse</h1>
   <p>An intelligent, automated platform for educators and students to track, manage, and verify LeetCode progress seamlessly.</p>
+  <p><strong>🌐 Live Demo: <a href="https://leet-pulse.vercel.app/login">https://leet-pulse.vercel.app/login</a></strong></p>
 </div>
 
 ---
