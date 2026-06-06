@@ -20,7 +20,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           # Replace these with your actual Hugging Face details in your workflow
-          HF_USERNAME: ashutoshkumar46
+          HF_USERNAME: ashu7531
           HF_SPACE_NAME: leettrack-backend
         run: |
           cd backend
