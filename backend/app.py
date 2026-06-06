@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from models import db, User, Batch, Assignment, AssignmentProblem, StudentProgress, batch_students
-from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile, sync_all_active_students
-from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text
+from celery import Celery
+from celery.schedules import crontab
 import jwt
 import datetime
 import os
@@ -24,6 +24,35 @@ app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
+
+def make_celery(app):
+    celery = Celery(
+        app.import_name,
+        backend=os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
+        broker=os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+    )
+    celery.conf.update(app.config)
+
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+
+    celery.Task = ContextTask
+    return celery
+
+celery = make_celery(app)
+
+# Configure Celery Beat Schedule
+celery.conf.beat_schedule = {
+    'sync-all-students-every-6-hours': {
+        'task': 'tasks.sync_all_active_students_task',
+        'schedule': crontab(minute=0, hour='*/6'),
+    },
+}
+
+# Import tasks AFTER celery initialization to avoid circular imports
+from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile, sync_all_active_students_task, sync_student_progress_task
 
 # Ensure tables are created on startup (runs under gunicorn and direct execution)
 with app.app_context():
@@ -46,19 +75,9 @@ with app.app_context():
         except Exception:
             db.session.rollback()
 
-    # Wrapper to run cron job inside Flask app context
-    def scheduled_sync_job():
-        with app.app_context():
-            sync_all_active_students()
-
-    # Initialize and start the background Cron scheduler
-    scheduler = BackgroundScheduler()
-    # Run the automated sync every 6 hours
-    scheduler.add_job(func=scheduled_sync_job, trigger="interval", hours=6)
-    # Important: Do not start scheduler if running under a testing or short-lived CLI context
-    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        scheduler.start()
-        print("APScheduler started: automated sync configured for every 6 hours.")
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "healthy"}), 200
 
 # Helper: JWT Decorator
 def token_required(f):
@@ -680,7 +699,8 @@ def trigger_student_sync(current_user):
             }), 429
 
     try:
-        synced_count = sync_student_progress(current_user.id)
+        # Trigger Celery Task async instead of running synchronously
+        sync_student_progress_task.delay(current_user.id)
         stats = fetch_leetcode_user_profile(current_user.leetcode_username)
 
         # Cache the updated stats in the DB for leaderboard use
@@ -692,8 +712,7 @@ def trigger_student_sync(current_user):
             db.session.commit()
 
         return jsonify({
-            "message": "Progress synchronization completed!",
-            "synced_count": synced_count,
+            "message": "Progress synchronization initiated! Your data will update in the background.",
             "leetcode_stats": stats
         }), 200
     except Exception as e:

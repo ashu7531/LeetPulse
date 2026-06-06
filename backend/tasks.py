@@ -2,6 +2,7 @@ import requests
 import datetime
 from models import db, User, StudentProgress, AssignmentProblem, Assignment
 import os
+from celery import shared_task
 
 # Helper to fetch recent accepted submissions from LeetCode
 def fetch_leetcode_submissions(username):
@@ -68,7 +69,8 @@ def send_email_via_resend(to_email, subject, html_content):
         return False
 
 # Primary sync function for a student
-def sync_student_progress(student_id):
+@shared_task(name='tasks.sync_student_progress_task', bind=True, max_retries=3)
+def sync_student_progress_task(self, student_id):
     student = User.query.get(student_id)
     if not student or not student.leetcode_username:
         return 0
@@ -116,35 +118,28 @@ def sync_student_progress(student_id):
             record.solved_at = solved_at_time
             synced_count += 1
             
+    # Also sync global LeetCode stats for the leaderboard cache
+    stats = fetch_leetcode_user_profile(student.leetcode_username)
+    if stats:
+        student.lc_total_solved  = stats.get('all', 0)
+        student.lc_easy_solved   = stats.get('easy', 0)
+        student.lc_medium_solved = stats.get('medium', 0)
+        student.lc_hard_solved   = stats.get('hard', 0)
+
     student.last_synced_at = datetime.datetime.utcnow()
     db.session.commit()
         
     return synced_count
 
 # Trigger sync for all students in all active assignments
-def sync_all_active_students():
+@shared_task(name='tasks.sync_all_active_students_task')
+def sync_all_active_students_task():
     students = User.query.filter(User.role == 'STUDENT', User.leetcode_username != None).all()
-    total_synced = 0
     for student in students:
-        try:
-            # 1. Sync pending assignment problems
-            synced = sync_student_progress(student.id)
-            total_synced += synced
+        # Push each student into the Celery queue to be processed by workers in parallel!
+        sync_student_progress_task.delay(student.id)
             
-            # 2. Sync global LeetCode stats for the leaderboard cache
-            stats = fetch_leetcode_user_profile(student.leetcode_username)
-            if stats:
-                student.lc_total_solved  = stats.get('all', 0)
-                student.lc_easy_solved   = stats.get('easy', 0)
-                student.lc_medium_solved = stats.get('medium', 0)
-                student.lc_hard_solved   = stats.get('hard', 0)
-            
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error syncing student {student.username}: {str(e)}")
-            
-    return total_synced
+    return f"Queued {len(students)} students for background syncing."
 
 # Fetch LeetCode problem details (title, difficulty, questionId) by slug
 def fetch_leetcode_problem_details(title_slug):
