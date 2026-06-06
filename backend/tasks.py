@@ -75,6 +75,8 @@ def sync_student_progress_task(self, student_id):
     if not student or not student.leetcode_username:
         return 0
     
+    print(f"\n[WORKER TRACKER] 🚀 Worker grabbed task! Scraping LeetCode for student: {student.leetcode_username}...")
+    
     submissions = fetch_leetcode_submissions(student.leetcode_username)
     if not submissions:
         return 0
@@ -128,8 +130,10 @@ def sync_student_progress_task(self, student_id):
 
     student.last_synced_at = datetime.datetime.utcnow()
     db.session.commit()
+    
+    print(f"[WORKER TRACKER] ✅ SUCCESS! Saved {synced_count} new submissions for {student.leetcode_username} to Neon Database.\n")
         
-    return synced_count
+    return f"Synced {synced_count} problems for {student.leetcode_username}"
 
 # Trigger sync for all students in all active assignments
 @shared_task(name='tasks.sync_all_active_students_task')
