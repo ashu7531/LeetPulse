@@ -141,6 +141,12 @@ def register():
     if role not in ["TEACHER", "STUDENT"]:
         return jsonify({"message": "Invalid role!"}), 400
 
+    if role == "TEACHER":
+        admin_code = data.get("admin_code")
+        expected_code = os.environ.get("TEACHER_SECRET_CODE", "LEETPULSE_2026")
+        if admin_code != expected_code:
+            return jsonify({"message": "Invalid Teacher Access Code!"}), 403
+
     if User.query.filter_by(email=email).first():
         return jsonify({"message": "User with this email already exists!"}), 409
 
