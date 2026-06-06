@@ -134,11 +134,14 @@ def sync_student_progress_task(self, student_id):
 # Trigger sync for all students in all active assignments
 @shared_task(name='tasks.sync_all_active_students_task')
 def sync_all_active_students_task():
+    print(f"\n[CRON TRACKER] ⏰ Woke up! Finding students to sync...")
     students = User.query.filter(User.role == 'STUDENT', User.leetcode_username != None).all()
+    print(f"[CRON TRACKER] Found {len(students)} active students. Dropping them into the Redis queue...")
     for student in students:
         # Push each student into the Celery queue to be processed by workers in parallel!
         sync_student_progress_task.delay(student.id)
             
+    print(f"[CRON TRACKER] ✅ Successfully queued {len(students)} students! Going back to sleep.\n")
     return f"Queued {len(students)} students for background syncing."
 
 # Fetch LeetCode problem details (title, difficulty, questionId) by slug

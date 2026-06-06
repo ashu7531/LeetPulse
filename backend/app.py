@@ -22,6 +22,10 @@ if DATABASE_URL.startswith("postgres://"):
 
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
 
 db.init_app(app)
 
@@ -49,9 +53,9 @@ celery = make_celery(app)
 
 # Configure Celery Beat Schedule
 celery.conf.beat_schedule = {
-    'sync-all-students-every-6-hours': {
+    'sync-all-students-every-20-seconds': {
         'task': 'tasks.sync_all_active_students_task',
-        'schedule': crontab(minute=0, hour='*/6'),
+        'schedule': 20.0, # Every 20 seconds for rapid testing
     },
 }
 
