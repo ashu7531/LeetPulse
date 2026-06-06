@@ -26,10 +26,14 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 
 def make_celery(app):
+    redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+    if redis_url.startswith("rediss://") and "ssl_cert_reqs" not in redis_url:
+        redis_url += "?ssl_cert_reqs=CERT_NONE"
+
     celery = Celery(
         app.import_name,
-        backend=os.environ.get('REDIS_URL', 'redis://localhost:6379/0'),
-        broker=os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+        backend=redis_url,
+        broker=redis_url
     )
     celery.conf.update(app.config)
 
