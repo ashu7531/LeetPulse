@@ -19,6 +19,7 @@ const StudentDashboard: React.FC = () => {
 
   // Input states
   const [leetcodeUsername, setLeetcodeUsername] = useState('');
+  const [editingLeetcode, setEditingLeetcode] = useState(false);
   const [batchJoinCode, setBatchJoinCode] = useState('');
   
   // Loading states
@@ -139,6 +140,7 @@ const StudentDashboard: React.FC = () => {
         setLeetcodeStats(updatedUser.leetcode_stats);
       }
       setMessage({ text: 'LeetCode profile linked successfully!', type: 'success' });
+      setEditingLeetcode(false);
       fetchDashboardData();
     } catch (err: any) {
       setMessage({ 
@@ -286,7 +288,7 @@ const StudentDashboard: React.FC = () => {
 
   const isLinked = !!currentUser?.leetcode_username;
   const isEnrolled = !!(currentUser?.batches && currentUser.batches.length > 0);
-  const showOnboarding = !isLinked || !isEnrolled;
+  const showOnboarding = (!isLinked || !isEnrolled) && !editingLeetcode;
   const currentBatch = isEnrolled ? currentUser?.batches?.[0] : null;
 
   return (
@@ -333,14 +335,25 @@ const StudentDashboard: React.FC = () => {
                         <span className="text-xs text-gray-400">Allows progress verification.</span>
                       </div>
                     </div>
-                    {isLinked && (
-                      <span className="text-[10px] uppercase font-bold text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full">
-                        Linked
-                      </span>
+                    {isLinked && !editingLeetcode && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase font-bold text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full">
+                          Linked
+                        </span>
+                        <button
+                          onClick={() => {
+                            setLeetcodeUsername(currentUser.leetcode_username || '');
+                            setEditingLeetcode(true);
+                          }}
+                          className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 px-2 py-0.5 rounded-full transition-colors"
+                        >
+                          Edit
+                        </button>
+                      </div>
                     )}
                   </div>
 
-                  {!isLinked && (
+                  {(!isLinked || editingLeetcode) && (
                     <form onSubmit={handleLinkLeetCode} className="flex items-center gap-3 mt-4">
                       <input
                         type="text"
@@ -355,8 +368,17 @@ const StudentDashboard: React.FC = () => {
                         disabled={linkLoading}
                         className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-xs transition-all disabled:opacity-50"
                       >
-                        {linkLoading ? 'Linking...' : 'Link Profile'}
+                        {linkLoading ? 'Saving...' : (isLinked ? 'Update Profile' : 'Link Profile')}
                       </button>
+                      {editingLeetcode && isLinked && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingLeetcode(false)}
+                          className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl text-xs transition-all"
+                        >
+                          Cancel
+                        </button>
+                      )}
                     </form>
                   )}
                 </div>
@@ -432,16 +454,53 @@ const StudentDashboard: React.FC = () => {
                 </h2>
                 <p className="text-xs text-gray-400 mt-1 max-w-2xl">{currentBatch?.description}</p>
                 
-                {currentUser?.leetcode_username && (
+                {currentUser?.leetcode_username && !editingLeetcode && (
                   <div className="text-[10px] text-indigo-400 font-semibold flex items-center gap-1.5 mt-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                     LeetCode Profile: <span className="text-white font-bold">{currentUser.leetcode_username}</span>
+                    <button
+                      onClick={() => {
+                        setLeetcodeUsername(currentUser.leetcode_username || '');
+                        setEditingLeetcode(true);
+                      }}
+                      className="text-gray-400 hover:text-white underline ml-1"
+                    >
+                      (Edit)
+                    </button>
                     {currentUser.last_synced_at && (
-                      <span className="text-gray-500">| Last verified: {new Date(currentUser.last_synced_at).toLocaleString()}</span>
+                      <span className="text-gray-500 ml-2">| Last verified: {new Date(currentUser.last_synced_at).toLocaleString()}</span>
                     )}
                   </div>
                 )}
-                {leetcodeStats && (
+                
+                {editingLeetcode && (
+                  <form onSubmit={handleLinkLeetCode} className="flex items-center gap-2 mt-2">
+                    <input
+                      type="text"
+                      value={leetcodeUsername}
+                      onChange={(e) => setLeetcodeUsername(e.target.value)}
+                      placeholder="LeetCode Username"
+                      required
+                      className="px-2 py-1 bg-slate-900 border border-white/10 rounded text-[10px] text-white focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={linkLoading}
+                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded text-[10px] disabled:opacity-50"
+                    >
+                      {linkLoading ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingLeetcode(false)}
+                      className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded text-[10px]"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                )}
+                
+                {leetcodeStats && !editingLeetcode && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     <span className="text-[9px] bg-slate-900 border border-white/5 px-2 py-0.5 rounded text-gray-300">
                       Solved: <span className="font-bold text-white">{leetcodeStats.all}</span>

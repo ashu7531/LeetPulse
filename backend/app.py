@@ -53,9 +53,9 @@ celery = make_celery(app)
 
 # Configure Celery Beat Schedule
 celery.conf.beat_schedule = {
-    'sync-all-students-every-20-seconds': {
+    'sync-all-students-every-6-hours': {
         'task': 'tasks.sync_all_active_students_task',
-        'schedule': 20.0, # Every 20 seconds for rapid testing
+        'schedule': crontab(minute=0, hour='*/6'),
     },
 }
 
@@ -669,15 +669,23 @@ def link_leetcode(current_user):
     if not leetcode_username:
         return jsonify({"message": "LeetCode username is required!"}), 400
 
-    current_user.leetcode_username = leetcode_username
+    # Check if someone else already linked this username
+    existing_user = User.query.filter(User.leetcode_username == leetcode_username, User.id != current_user.id).first()
+    if existing_user:
+        return jsonify({"message": "This LeetCode username is already linked to another account."}), 400
 
     # Fetch and cache LeetCode stats immediately on link
     stats = fetch_leetcode_user_profile(leetcode_username)
-    if stats:
-        current_user.lc_total_solved = stats.get('all', 0)
-        current_user.lc_easy_solved = stats.get('easy', 0)
-        current_user.lc_medium_solved = stats.get('medium', 0)
-        current_user.lc_hard_solved = stats.get('hard', 0)
+    
+    # Validate account exists
+    if not stats:
+        return jsonify({"message": "Invalid LeetCode username. Could not find profile."}), 404
+
+    current_user.leetcode_username = leetcode_username
+    current_user.lc_total_solved = stats.get('all', 0)
+    current_user.lc_easy_solved = stats.get('easy', 0)
+    current_user.lc_medium_solved = stats.get('medium', 0)
+    current_user.lc_hard_solved = stats.get('hard', 0)
 
     db.session.commit()
 
