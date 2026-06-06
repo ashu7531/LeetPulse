@@ -127,10 +127,23 @@ def sync_all_active_students():
     total_synced = 0
     for student in students:
         try:
+            # 1. Sync pending assignment problems
             synced = sync_student_progress(student.id)
             total_synced += synced
+            
+            # 2. Sync global LeetCode stats for the leaderboard cache
+            stats = fetch_leetcode_user_profile(student.leetcode_username)
+            if stats:
+                student.lc_total_solved  = stats.get('all', 0)
+                student.lc_easy_solved   = stats.get('easy', 0)
+                student.lc_medium_solved = stats.get('medium', 0)
+                student.lc_hard_solved   = stats.get('hard', 0)
+            
+            db.session.commit()
         except Exception as e:
+            db.session.rollback()
             print(f"Error syncing student {student.username}: {str(e)}")
+            
     return total_synced
 
 # Fetch LeetCode problem details (title, difficulty, questionId) by slug

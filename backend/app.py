@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from models import db, User, Batch, Assignment, AssignmentProblem, StudentProgress, batch_students
-from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile
+from tasks import sync_student_progress, send_email_via_resend, fetch_leetcode_problem_details, fetch_leetcode_user_profile, sync_all_active_students
+from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text
 import jwt
 import datetime
@@ -44,6 +45,20 @@ with app.app_context():
             db.session.commit()
         except Exception:
             db.session.rollback()
+
+    # Wrapper to run cron job inside Flask app context
+    def scheduled_sync_job():
+        with app.app_context():
+            sync_all_active_students()
+
+    # Initialize and start the background Cron scheduler
+    scheduler = BackgroundScheduler()
+    # Run the automated sync every 6 hours
+    scheduler.add_job(func=scheduled_sync_job, trigger="interval", hours=6)
+    # Important: Do not start scheduler if running under a testing or short-lived CLI context
+    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        scheduler.start()
+        print("APScheduler started: automated sync configured for every 6 hours.")
 
 # Helper: JWT Decorator
 def token_required(f):
@@ -654,6 +669,15 @@ def link_leetcode(current_user):
 def trigger_student_sync(current_user):
     if not current_user.leetcode_username:
         return jsonify({"message": "Please link your LeetCode username first!"}), 400
+
+    # Cooldown check: 10 minutes
+    if current_user.last_synced_at:
+        time_since_sync = datetime.datetime.utcnow() - current_user.last_synced_at
+        if time_since_sync < datetime.timedelta(minutes=10):
+            minutes_left = 10 - int(time_since_sync.total_seconds() / 60)
+            return jsonify({
+                "message": f"Please wait {minutes_left} more minute(s) before syncing again. (Auto-sync runs every 6 hours!)"
+            }), 429
 
     try:
         synced_count = sync_student_progress(current_user.id)

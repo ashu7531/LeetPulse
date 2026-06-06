@@ -40,6 +40,9 @@ const StudentDashboard: React.FC = () => {
   const [viewingLanguage, setViewingLanguage] = useState<string | null>(null);
   const [viewingProblemTitle, setViewingProblemTitle] = useState<string | null>(null);
 
+  // Sync Cooldown State
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+
   useEffect(() => {
     // Only restore the leetcode username input from cache for UX convenience.
     // Do NOT restore currentUser from localStorage - always trust the fresh API response.
@@ -57,6 +60,36 @@ const StudentDashboard: React.FC = () => {
     }
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    if (currentUser?.last_synced_at) {
+      // Add 'Z' to ensure it's parsed as UTC if the backend didn't append it
+      const syncTimeStr = currentUser.last_synced_at.endsWith('Z') 
+        ? currentUser.last_synced_at 
+        : currentUser.last_synced_at + 'Z';
+      
+      const syncTime = new Date(syncTimeStr).getTime();
+      const now = new Date().getTime();
+      const diffSeconds = Math.floor((now - syncTime) / 1000);
+      const remaining = 600 - diffSeconds; // 10 minutes = 600 seconds
+      
+      if (remaining > 0) {
+        setCooldownSeconds(remaining);
+      } else {
+        setCooldownSeconds(0);
+      }
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (cooldownSeconds > 0) {
+      interval = setInterval(() => {
+        setCooldownSeconds(prev => prev > 0 ? prev - 1 : 0);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [cooldownSeconds]);
 
   const fetchDashboardData = async () => {
     setDataLoading(true);
@@ -170,6 +203,8 @@ const StudentDashboard: React.FC = () => {
         text: `Progress synced! ${res.data.synced_count} new solves verified.`, 
         type: 'success' 
       });
+      // Start cooldown immediately on successful sync
+      setCooldownSeconds(600);
       fetchDashboardData();
     } catch (err: any) {
       setMessage({ 
@@ -427,11 +462,18 @@ const StudentDashboard: React.FC = () => {
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleManualSync}
-                  disabled={syncLoading}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border border-white/5 hover:border-indigo-500/30 text-white rounded-xl text-xs font-semibold transition-all"
+                  disabled={syncLoading || cooldownSeconds > 0}
+                  className={`flex items-center gap-2 px-4 py-2.5 border rounded-xl text-xs font-semibold transition-all ${
+                    cooldownSeconds > 0 
+                      ? 'bg-slate-900/50 border-white/5 text-gray-500 cursor-not-allowed'
+                      : 'bg-slate-900 border-white/5 hover:border-indigo-500/30 text-white'
+                  }`}
+                  title={cooldownSeconds > 0 ? "You can sync again shortly." : "Manually sync progress with LeetCode"}
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${syncLoading ? 'animate-spin' : ''}`} />
-                  Sync LeetCode Status
+                  {cooldownSeconds > 0 
+                    ? `Syncing available in ${Math.floor(cooldownSeconds / 60)}:${(cooldownSeconds % 60).toString().padStart(2, '0')}`
+                    : 'Sync LeetCode Status'}
                 </button>
                 <button
                   onClick={handleLeaveBatch}
