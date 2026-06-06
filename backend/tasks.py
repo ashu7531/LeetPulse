@@ -69,7 +69,7 @@ def send_email_via_resend(to_email, subject, html_content):
         return False
 
 # Primary sync function for a student
-@shared_task(name='tasks.sync_student_progress_task', bind=True, max_retries=3)
+@shared_task(name='tasks.sync_student_progress_task', bind=True, max_retries=3, rate_limit='30/m')
 def sync_student_progress_task(self, student_id):
     student = User.query.get(student_id)
     if not student or not student.leetcode_username:

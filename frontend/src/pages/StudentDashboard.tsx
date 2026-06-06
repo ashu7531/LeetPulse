@@ -11,6 +11,8 @@ const StudentDashboard: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [assignments, setAssignments] = useState<StudentAssignmentProgress[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardPage, setLeaderboardPage] = useState(1);
+  const [leaderboardHasNext, setLeaderboardHasNext] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<StudentAssignmentProgress | null>(null);
   const [leetcodeStats, setLeetcodeStats] = useState<{ all: number; easy: number; medium: number; hard: number } | null>(null);
   
@@ -111,10 +113,12 @@ const StudentDashboard: React.FC = () => {
       if (fullyOnboarded) {
         const [assignmentsRes, leaderboardRes] = await Promise.all([
           api.get('/student/assignments'),
-          api.get('/student/leaderboard'),
+          api.get('/student/leaderboard?page=1&limit=15'),
         ]);
         setAssignments(assignmentsRes.data);
-        setLeaderboard(leaderboardRes.data);
+        setLeaderboard(leaderboardRes.data.data);
+        setLeaderboardPage(leaderboardRes.data.page);
+        setLeaderboardHasNext(leaderboardRes.data.has_next);
       } else {
         // Clear stale data in case the user just left a batch
         setAssignments([]);
@@ -124,6 +128,17 @@ const StudentDashboard: React.FC = () => {
       console.error('Error fetching dashboard data:', err);
     } finally {
       setDataLoading(false);
+    }
+  };
+
+  const fetchLeaderboardPage = async (page: number) => {
+    try {
+      const res = await api.get(`/student/leaderboard?page=${page}&limit=15`);
+      setLeaderboard(res.data.data);
+      setLeaderboardPage(res.data.page);
+      setLeaderboardHasNext(res.data.has_next);
+    } catch (err) {
+      console.error('Error fetching leaderboard page:', err);
     }
   };
 
@@ -684,53 +699,76 @@ const StudentDashboard: React.FC = () => {
                     No students have linked their LeetCode accounts yet. Sync your progress to appear here.
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {leaderboard.map((entry: any) => {
-                      const isCurrentUser = entry.username === currentUser?.username;
-                      
-                      let rankBadge = `${entry.rank}`;
-                      if (entry.rank === 1) rankBadge = '🥇';
-                      else if (entry.rank === 2) rankBadge = '🥈';
-                      else if (entry.rank === 3) rankBadge = '🥉';
+                    <div className="space-y-3">
+                      {leaderboard.map((entry: any) => {
+                        const isCurrentUser = entry.username === currentUser?.username;
+                        
+                        let rankBadge = `${entry.rank}`;
+                        if (entry.rank === 1) rankBadge = '🥇';
+                        else if (entry.rank === 2) rankBadge = '🥈';
+                        else if (entry.rank === 3) rankBadge = '🥉';
 
-                      return (
-                        <div 
-                          key={entry.student_id} 
-                          className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
-                            isCurrentUser 
-                              ? 'bg-indigo-500/10 border-indigo-500/40 shadow-lg shadow-indigo-500/5' 
-                              : 'bg-slate-950/40 border-white/5'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm font-bold text-gray-400 w-6 text-center">{rankBadge}</span>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className={`block text-sm font-bold ${isCurrentUser ? 'text-indigo-300' : 'text-white'}`}>
-                                  {entry.username}
-                                </span>
-                                {isCurrentUser && (
-                                  <span className="text-[9px] bg-indigo-500/20 text-indigo-300 font-bold px-1.5 py-0.5 rounded uppercase">
-                                    You
+                        return (
+                          <div 
+                            key={entry.student_id} 
+                            className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
+                              isCurrentUser 
+                                ? 'bg-indigo-500/10 border-indigo-500/40 shadow-lg shadow-indigo-500/5' 
+                                : 'bg-slate-950/40 border-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-bold text-gray-400 w-6 text-center">{rankBadge}</span>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`block text-sm font-bold ${isCurrentUser ? 'text-indigo-300' : 'text-white'}`}>
+                                    {entry.username}
                                   </span>
-                                )}
+                                  {isCurrentUser && (
+                                    <span className="text-[9px] bg-indigo-500/20 text-indigo-300 font-bold px-1.5 py-0.5 rounded uppercase">
+                                      You
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-gray-500 block mt-0.5">{entry.leetcode_username || 'No LeetCode linked'}</span>
                               </div>
-                              <span className="text-[10px] text-gray-500 block mt-0.5">{entry.leetcode_username || 'No LeetCode linked'}</span>
                             </div>
-                          </div>
 
-                          <div className="text-right">
-                            <span className="block text-xs font-bold text-white">{entry.lc_total_solved ?? 0} solved</span>
-                            <div className="flex gap-2 justify-end mt-1">
-                              <span className="text-[9px] text-green-400">{entry.lc_easy_solved ?? 0}E</span>
-                              <span className="text-[9px] text-yellow-400">{entry.lc_medium_solved ?? 0}M</span>
-                              <span className="text-[9px] text-red-400">{entry.lc_hard_solved ?? 0}H</span>
+                            <div className="text-right">
+                              <span className="block text-xs font-bold text-white">{entry.lc_total_solved ?? 0} solved</span>
+                              <div className="flex gap-2 justify-end mt-1">
+                                <span className="text-[9px] text-green-400">{entry.lc_easy_solved ?? 0}E</span>
+                                <span className="text-[9px] text-yellow-400">{entry.lc_medium_solved ?? 0}M</span>
+                                <span className="text-[9px] text-red-400">{entry.lc_hard_solved ?? 0}H</span>
+                              </div>
                             </div>
                           </div>
+                        );
+                      })}
+                      
+                      {/* Pagination Controls */}
+                      <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/5">
+                        <div className="text-xs text-gray-400">
+                          Showing page {leaderboardPage}
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => fetchLeaderboardPage(leaderboardPage - 1)}
+                            disabled={leaderboardPage === 1}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            onClick={() => fetchLeaderboardPage(leaderboardPage + 1)}
+                            disabled={!leaderboardHasNext}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                 )}
               </div>
             )}

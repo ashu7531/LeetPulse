@@ -21,6 +21,13 @@ const TeacherDashboard: React.FC = () => {
   const [selectedLeaderboardBatch, setSelectedLeaderboardBatch] = useState<Batch | null>(null);
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardPage, setLeaderboardPage] = useState(1);
+  const [leaderboardHasNext, setLeaderboardHasNext] = useState(false);
+  
+  // Student Pagination State
+  const [studentPage, setStudentPage] = useState(1);
+  const [studentHasNext, setStudentHasNext] = useState(false);
+  const [studentTotal, setStudentTotal] = useState(0);
 
   // Modals / Form States
   const [showCreateBatch, setShowCreateBatch] = useState(false);
@@ -85,16 +92,32 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
+  const fetchStudentsPage = async (batchId: number, page: number) => {
+    try {
+      const res = await api.get(`/teacher/batches/${batchId}/students?page=${page}&limit=15`);
+      setBatchStudents(res.data.data);
+      setStudentPage(res.data.page);
+      setStudentHasNext(res.data.has_next);
+      setStudentTotal(res.data.total);
+    } catch (err) {
+      console.error('Error fetching students page:', err);
+    }
+  };
+
   const handleSelectBatch = async (batch: Batch) => {
     setSelectedBatch(batch);
     setBatchDetailTab('assignments');
     setLoading(true);
     try {
       const [studentsRes, assignmentsRes] = await Promise.all([
-        api.get(`/teacher/batches/${batch.id}/students`),
+        api.get(`/teacher/batches/${batch.id}/students?page=1&limit=15`),
         api.get(`/teacher/batches/${batch.id}/assignments`)
       ]);
-      setBatchStudents(studentsRes.data);
+      setBatchStudents(studentsRes.data.data);
+      setStudentPage(studentsRes.data.page);
+      setStudentHasNext(studentsRes.data.has_next);
+      setStudentTotal(studentsRes.data.total);
+      
       setBatchAssignments(assignmentsRes.data);
     } catch (err) {
       console.error('Error fetching batch details:', err);
@@ -113,8 +136,7 @@ const TeacherDashboard: React.FC = () => {
       setSuccess('Student added successfully!');
       setStudentEmail('');
       // Reload students
-      const studentsRes = await api.get(`/teacher/batches/${selectedBatch!.id}/students`);
-      setBatchStudents(studentsRes.data);
+      await fetchStudentsPage(selectedBatch!.id, studentPage);
       setTimeout(() => {
         setShowAddStudent(false);
         setSuccess('');
@@ -137,8 +159,7 @@ const TeacherDashboard: React.FC = () => {
       await api.delete(`/teacher/batches/${selectedBatch!.id}/students/${studentId}`);
       setSuccess('Student removed successfully!');
       // Reload students
-      const studentsRes = await api.get(`/teacher/batches/${selectedBatch!.id}/students`);
-      setBatchStudents(studentsRes.data);
+      await fetchStudentsPage(selectedBatch!.id, studentPage);
       setTimeout(() => {
         setSuccess('');
       }, 1000);
@@ -231,12 +252,14 @@ const TeacherDashboard: React.FC = () => {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const fetchUnifiedLeaderboard = async (batch: Batch) => {
+  const fetchUnifiedLeaderboard = async (batch: Batch, page: number = 1) => {
     setSelectedLeaderboardBatch(batch);
     setLeaderboardLoading(true);
     try {
-      const res = await api.get(`/teacher/batches/${batch.id}/leaderboard`);
-      setLeaderboardData(res.data);
+      const res = await api.get(`/teacher/batches/${batch.id}/leaderboard?page=${page}&limit=15`);
+      setLeaderboardData(res.data.data);
+      setLeaderboardPage(res.data.page);
+      setLeaderboardHasNext(res.data.has_next);
     } catch (err) {
       console.error('Error loading leaderboard:', err);
     } finally {
@@ -420,6 +443,29 @@ const TeacherDashboard: React.FC = () => {
                           </div>
                         );
                       })}
+                      
+                      {/* Pagination Controls */}
+                      <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/5">
+                        <div className="text-xs text-gray-400">
+                          Showing page {leaderboardPage}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => fetchUnifiedLeaderboard(selectedLeaderboardBatch!, leaderboardPage - 1)}
+                            disabled={leaderboardPage === 1}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            onClick={() => fetchUnifiedLeaderboard(selectedLeaderboardBatch!, leaderboardPage + 1)}
+                            disabled={!leaderboardHasNext}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -557,38 +603,63 @@ const TeacherDashboard: React.FC = () => {
                     No students currently enrolled. Share the Join Code to enroll them.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {batchStudents.map((stud) => (
-                      <div key={stud.id} className="p-4 bg-slate-900/40 border border-white/5 rounded-xl flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                            <Users size={18} />
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {batchStudents.map((stud) => (
+                        <div key={stud.id} className="p-4 bg-slate-900/40 border border-white/5 rounded-xl flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                              <Users size={18} />
+                            </div>
+                            <div>
+                              <span className="block text-sm font-bold text-white">{stud.username}</span>
+                              <span className="block text-xs text-gray-500">{stud.email}</span>
+                              {stud.leetcode_username ? (
+                                <span className="inline-block text-[10px] text-yellow-400 font-semibold mt-1">
+                                  LeetCode: {stud.leetcode_username}
+                                </span>
+                              ) : (
+                                <span className="inline-block text-[10px] text-gray-500 mt-1">
+                                  No LeetCode linked
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            <span className="block text-sm font-bold text-white">{stud.username}</span>
-                            <span className="block text-xs text-gray-500">{stud.email}</span>
-                            {stud.leetcode_username ? (
-                              <span className="inline-block text-[10px] text-yellow-400 font-semibold mt-1">
-                                LeetCode: {stud.leetcode_username}
-                              </span>
-                            ) : (
-                              <span className="inline-block text-[10px] text-gray-500 mt-1">
-                                No LeetCode linked
-                              </span>
-                            )}
-                          </div>
-                        </div>
 
+                          <button
+                            onClick={() => handleRemoveStudent(stud.id)}
+                            className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all"
+                            title="Remove student from batch"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {/* Pagination Controls */}
+                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-white/5">
+                      <div className="text-xs text-gray-400">
+                        Showing page {studentPage} (Total: {studentTotal})
+                      </div>
+                      <div className="flex gap-2">
                         <button
-                          onClick={() => handleRemoveStudent(stud.id)}
-                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all"
-                          title="Remove student from batch"
+                          onClick={() => fetchStudentsPage(selectedBatch!.id, studentPage - 1)}
+                          disabled={studentPage === 1}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
-                          <Trash2 size={16} />
+                          Previous
+                        </button>
+                        <button
+                          onClick={() => fetchStudentsPage(selectedBatch!.id, studentPage + 1)}
+                          disabled={!studentHasNext}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Next
                         </button>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
             )}

@@ -245,9 +245,20 @@ def get_batch_students(current_user, batch_id):
     batch = Batch.query.filter_by(id=batch_id, teacher_id=current_user.id).first()
     if not batch:
         return jsonify({"message": "Batch not found!"}), 404
-        
-    students = [student.to_dict() for student in batch.students]
-    return jsonify(students), 200
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 15, type=int)
+
+    paginated_students = User.query.join(batch_students).filter(batch_students.c.batch_id == batch_id).paginate(page=page, per_page=limit, error_out=False)
+    
+    students = [student.to_dict() for student in paginated_students.items]
+    
+    return jsonify({
+        "data": students,
+        "page": paginated_students.page,
+        "pages": paginated_students.pages,
+        "total": paginated_students.total,
+        "has_next": paginated_students.has_next
+    }), 200
 
 @app.route("/api/teacher/batches/<int:batch_id>/students", methods=["POST"])
 @token_required
@@ -557,7 +568,24 @@ def get_teacher_leaderboard(current_user, batch_id):
     if not batch:
         return jsonify({"message": "Batch not found!"}), 404
 
-    return jsonify(get_leaderboard_data(batch_id)), 200
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 15, type=int)
+    leaderboard = get_leaderboard_data(batch_id)
+    
+    total = len(leaderboard)
+    pages = (total + limit - 1) // limit if limit > 0 else 1
+    
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_leaderboard = leaderboard[start:end]
+
+    return jsonify({
+        "data": paginated_leaderboard,
+        "page": page,
+        "pages": pages,
+        "total": total,
+        "has_next": page < pages
+    }), 200
 
 # --- STUDENT ENDPOINTS ---
 
@@ -796,7 +824,22 @@ def get_student_leaderboard(current_user):
     for i, entry in enumerate(leaderboard):
         entry["rank"] = i + 1
 
-    return jsonify(leaderboard), 200
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 15, type=int)
+    total = len(leaderboard)
+    pages = (total + limit - 1) // limit if limit > 0 else 1
+    
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_leaderboard = leaderboard[start:end]
+
+    return jsonify({
+        "data": paginated_leaderboard,
+        "page": page,
+        "pages": pages,
+        "total": total,
+        "has_next": page < pages
+    }), 200
 
 @app.route("/api/student/join-batch", methods=["POST"])
 @token_required
