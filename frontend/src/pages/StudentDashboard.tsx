@@ -418,23 +418,45 @@ const StudentDashboard: React.FC = () => {
                   </div>
 
                   {!isEnrolled && (
-                    <form onSubmit={handleJoinBatch} className="flex items-center gap-3 mt-4">
-                      <input
-                        type="text"
-                        value={batchJoinCode}
-                        onChange={(e) => setBatchJoinCode(e.target.value)}
-                        placeholder="Batch Join Code (e.g. X7A9B2)"
-                        required
-                        className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                      />
-                      <button
-                        type="submit"
-                        disabled={joinLoading}
-                        className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-xs transition-all disabled:opacity-50"
-                      >
-                        {joinLoading ? 'Joining...' : 'Join Class'}
-                      </button>
-                    </form>
+                    <div className="mt-4">
+                      <form onSubmit={handleJoinBatch} className="flex items-center gap-3">
+                        <input
+                          type="text"
+                          value={batchJoinCode}
+                          onChange={(e) => setBatchJoinCode(e.target.value)}
+                          placeholder="Batch Join Code (e.g. X7A9B2)"
+                          required
+                          className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                        />
+                        <button
+                          type="submit"
+                          disabled={joinLoading}
+                          className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-xs transition-all disabled:opacity-50"
+                        >
+                          {joinLoading ? 'Joining...' : 'Join Class'}
+                        </button>
+                      </form>
+                      
+                      <div className="mt-3 p-3 bg-slate-800/50 border border-white/5 rounded-xl flex items-center justify-between gap-3">
+                        <div className="text-[11px] text-gray-400">
+                          <span className="font-semibold text-white">Don't have a class code?</span> Use the open sandbox.
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <code className="px-2 py-1 bg-slate-950 rounded text-indigo-400 font-mono text-[10px] font-bold border border-white/5">
+                            4NGY3Z
+                          </code>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText('4NGY3Z');
+                              setBatchJoinCode('4NGY3Z');
+                            }}
+                            className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] font-bold rounded flex items-center gap-1.5 transition-colors"
+                          >
+                            <Copy size={10} /> Copy & Fill
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
